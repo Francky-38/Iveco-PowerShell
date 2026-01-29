@@ -439,57 +439,54 @@ function Show-SearchGui {
                 $FilePath = $PptxPaths[$SopName]
                 if (Test-Path $FilePath) {
                     try {
-                        # Ouvrir le fichier PPTX avec PowerPoint
-                        if ([int]::TryParse($PageNum, [ref]$null)) {
-                            # Ouvrir à la page spécifique (numéro de slide)
-                            $PowerPoint = New-Object -ComObject PowerPoint.Application
-                            $PowerPoint.Visible = $true
-                            
-                            # Ouvrir la présentation
-                            $Presentation = $PowerPoint.Presentations.Open(
-                                $FilePath,                                          # FileName
-                                [Microsoft.Office.Core.MsoTriState]::msoTrue,      # LinkToFile
-                                [Microsoft.Office.Core.MsoTriState]::msoTrue,      # SaveWithDocument
-                                [Microsoft.Office.Core.MsoTriState]::msoTrue       # Untitled
-                            )
-                            
-                            # Attendre un peu que PowerPoint charge complètement
-                            Start-Sleep -Milliseconds 1000
-                            
-                            # Aller à la slide spécifique
-                            $SlideIndex = [int]$PageNum
-                            if ($SlideIndex -le $Presentation.Slides.Count -and $SlideIndex -gt 0) {
+                        # Créer un paramètre avec le numéro de page
+                        $Arguments = "`"$FilePath`""
+                        
+                        # Lancer PowerPoint avec le fichier (et optionnellement la page)
+                        Start-Process -FilePath "powerpnt.exe" -ArgumentList $Arguments
+                        
+                        # En arrière-plan, essayer de naviguer si le numéro est valide
+                        $SlideIndex = 0
+                        if ([int]::TryParse($PageNum, [ref]$SlideIndex)) {
+                            # Créer une job asynchrone pour la navigation
+                            $NavigationScript = {
+                                param($FilePath, $SlideNum)
+                                
+                                Start-Sleep -Milliseconds 500
+                                
                                 try {
-                                    # S'assurer que nous sommes en mode Normal View
-                                    $PowerPoint.ActiveWindow.ViewType = 1  # 1 = ppViewNormal
+                                    $PowerPoint = New-Object -ComObject PowerPoint.Application
                                     
-                                    # Sélectionner la slide
-                                    $Presentation.Slides($SlideIndex).Select()
+                                    # Chercher la présentation ouverte
+                                    $Presentation = $null
+                                    foreach ($Pres in $PowerPoint.Presentations) {
+                                        if ($Pres.FullName -eq $FilePath) {
+                                            $Presentation = $Pres
+                                            break
+                                        }
+                                    }
                                     
-                                    # Attendre un peu plus
-                                    Start-Sleep -Milliseconds 500
-                                    
-                                    # Forcer le refresh de la vue
-                                    $PowerPoint.ActiveWindow.Activate()
+                                    if ($Presentation -and $SlideNum -le $Presentation.Slides.Count -and $SlideNum -gt 0) {
+                                        # S'assurer qu'on est en Normal View
+                                        $PowerPoint.ActiveWindow.ViewType = 1
+                                        
+                                        # Attendre un peu
+                                        Start-Sleep -Milliseconds 200
+                                        
+                                        # Naviguer à la slide
+                                        $Presentation.Slides($SlideNum).Select()
+                                    }
                                 }
                                 catch {
-                                    # Si ça ne fonctionne pas, juste ouvrir le fichier normalement
-                                    [System.Windows.Forms.MessageBox]::Show("Impossible d'aller à la slide $SlideIndex. Le fichier s'ouvre à la slide 1.", "Info", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+                                    # Silencieusement ignorer les erreurs de navigation
                                 }
                             }
-                        } else {
-                            # Ouvrir simplement le fichier si pas de numéro de page
-                            Invoke-Item $FilePath
+                            
+                            Start-Job -ScriptBlock $NavigationScript -ArgumentList $FilePath, $SlideIndex | Out-Null
                         }
                     }
                     catch {
-                        # En cas d'erreur avec PowerPoint COM, utiliser Invoke-Item
-                        try {
-                            Invoke-Item $FilePath
-                        }
-                        catch {
-                            [System.Windows.Forms.MessageBox]::Show("Erreur: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                        }
+                        [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
                     }
                 } else {
                     [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
@@ -506,8 +503,9 @@ function Show-SearchGui {
         
         if ($HitTest.ColumnIndex -eq 2 -and $HitTest.RowIndex -ge 0) {
             $SopName = $DataGridView.Rows[$HitTest.RowIndex].Cells[2].Value
+            $PageNum = $DataGridView.Rows[$HitTest.RowIndex].Cells[3].Value
             if ($PptxPaths.ContainsKey($SopName)) {
-                $Form.Text = "Chemin: " + $PptxPaths[$SopName]
+                $Form.Text = "Chemin: " + $PptxPaths[$SopName] + " | Page: " + $PageNum
             }
         } else {
             $SearchCount = $DataGridView.Rows.Count
@@ -631,5 +629,94 @@ function Export-PptxTextContent {
     finally {
         # Nettoyer le dossier temporaire
         Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+<#
+.SYNOPSIS
+    Ouvre un fichier PowerPoint à la page spécifiée via VBScript
+
+.DESCRIPTION
+    Crée un VBScript temporaire pour ouvrir PowerPoint à la slide spécifique
+    Cette approche est plus fiable que la COM PowerPoint directe
+
+.PARAMETER FilePath
+    Chemin complet du fichier PPTX
+
+.PARAMETER SlideNumber
+    Numéro de la slide à afficher
+
+.EXAMPLE
+    Open-PowerPointAtSlide -FilePath "D:\file.pptx" -SlideNumber 5
+#>
+
+function Open-PowerPointAtSlide {
+    param(
+        [string]$FilePath,
+        [int]$SlideNumber
+    )
+    
+    # Vérifier que le fichier existe
+    if (-not (Test-Path $FilePath)) {
+        [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        return
+    }
+
+    # Créer un script VBScript temporaire
+    $VBScriptPath = Join-Path $env:TEMP "PowerPoint_Goto_$([System.Guid]::NewGuid()).vbs"
+    
+    $VBScript = @"
+Dim objPPT, objPresentation, slideNum
+
+Set objPPT = CreateObject("PowerPoint.Application")
+objPPT.Visible = True
+
+' Ouvrir la présentation
+Set objPresentation = objPPT.Presentations.Open("$FilePath", , , msoTrue)
+
+' Attendre le chargement complet
+WScript.Sleep(2000)
+
+' Aller à la slide
+slideNum = CInt($SlideNumber)
+
+' DEBUG: Afficher la valeur pour vérifier
+' MsgBox "Slide Number: " & slideNum & " Total Slides: " & objPresentation.Slides.Count
+
+If slideNum <= objPresentation.Slides.Count And slideNum > 0 Then
+    On Error Resume Next
+    
+    ' Configurer le diaporama pour démarrer à cette slide
+    With objPresentation.SlideShowSettings
+        .StartingSlide = CInt(slideNum)
+        .EndingSlide = CInt(slideNum)
+        .ShowType = 3  ' Normal view (pas plein écran)
+        .Run  ' Lancer le diaporama
+    End With
+    
+    On Error GoTo 0
+Else
+    MsgBox "Slide " & slideNum & " invalide. Total: " & objPresentation.Slides.Count
+End If
+
+' Garder PowerPoint ouvert
+Set objPresentation = Nothing
+Set objPPT = Nothing
+"@
+
+    # Écrire le VBScript
+    Set-Content -Path $VBScriptPath -Value $VBScript -Encoding ASCII
+    
+    try {
+        # Exécuter le VBScript en mode non-interactif
+        & cmd /c "cscript.exe //nologo `"$VBScriptPath`""
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+    finally {
+        # Nettoyer le fichier temporaire
+        Start-Sleep -Milliseconds 1000
+        Remove-Item -Path $VBScriptPath -Force -ErrorAction SilentlyContinue
     }
 }
