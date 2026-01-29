@@ -1,0 +1,13 @@
+# Dépendances PowerShell pour le projet Iveco
+
+# Modules système (installés par défaut)
+# - Microsoft.PowerShell.Utility
+# - Microsoft.PowerShell.Management
+
+# Modules supplémentaires (si nécessaire)
+# Décommentez et installez avec : Install-Module -Name NomModule -Force
+
+# Exemple de modules utiles :
+# PSScriptAnalyzer          # Analyse de code PowerShell
+# Pester                    # Framework de test
+# platyPS                   # Documentation

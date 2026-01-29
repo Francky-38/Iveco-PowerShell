@@ -1,0 +1,55 @@
+# PowerShell
+*.ps1~
+*.psc1
+*.pssc
+
+# Fichiers temporaires
+Temp/
+temp/
+tmp/
+Tmp/
+
+# Fichiers de sortie d'extraction
+RefServeur.xml
+References_Extraites.xml
+*.xml
+
+# Logs
+Logs/
+logs/
+*.log
+
+# IDE / Editeurs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Windows
+Thumbs.db
+.DS_Store
+
+# Node/NPM (si utilisé)
+node_modules/
+package-lock.json
+
+# Python (si utilisé)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Dossiers locaux de test/développement
+local/
+dev/
+test_data/
+
+# Fichiers sensibles
+config.local.ps1
+secrets.ps1
+*.credential
+
+# Données de test volumineuses
+large_files/
+*.zip
+*.rar
