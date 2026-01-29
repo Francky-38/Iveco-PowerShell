@@ -170,6 +170,10 @@ function Export-PptxReferencesFromTree {
                                                     
                                                     $Entry = $XmlOutput.CreateElement("Entree")
 
+                                                    $PathElem = $XmlOutput.CreateElement("Path")
+                                                    $PathElem.InnerText = $PptxFile.FullName
+                                                    $Entry.AppendChild($PathElem) | Out-Null
+
                                                     $AffaireElem = $XmlOutput.CreateElement("Affaire")
                                                     $AffaireElem.InnerText = $AffaireNom
                                                     $Entry.AppendChild($AffaireElem) | Out-Null
@@ -273,6 +277,29 @@ function Show-SearchGui {
     $XmlContent = [System.Xml.XmlDocument]::new()
     $XmlContent.Load($XmlPath)
     $AllEntries = $XmlContent.SelectNodes("//Entree")
+    
+    # Dictionnaire pour stocker les chemins des fichiers PPTX
+    $PptxPaths = @{}
+    
+    # Dictionnaire pour stocker les numéros de page
+    $PageNumbers = @{}
+
+    # Charger les chemins et les numéros de page dans les dictionnaires
+    foreach ($Entry in $AllEntries) {
+        $Path = $Entry.SelectSingleNode("Path").InnerText
+        $Archive = $Entry.SelectSingleNode("SOP").InnerText
+        $PageFile = $Entry.SelectSingleNode("Page").InnerText
+        
+        if (-not $PptxPaths.ContainsKey($Archive)) {
+            $PptxPaths[$Archive] = $Path
+        }
+        
+        # Extraire le numéro de page de "slide1.xml" → 1
+        $PageKey = "$Archive|$PageFile"
+        if ($PageFile -match 'slide(\d+)') {
+            $PageNumbers[$PageKey] = [int]$Matches[1]
+        }
+    }
 
     # Créer la fenêtre principale
     $Form = New-Object System.Windows.Forms.Form
@@ -337,17 +364,15 @@ function Show-SearchGui {
     $DataGridView.Font = New-Object System.Drawing.Font("Arial", 9)
 
     # Ajouter les colonnes
-    $DataGridView.ColumnCount = 5
-    $DataGridView.Columns[0].Name = "R" + [char]233 + "f" + [char]233 + "rence"
-    $DataGridView.Columns[0].Width = 120
-    $DataGridView.Columns[1].Name = "March" + [char]233
-    $DataGridView.Columns[1].Width = 180
-    $DataGridView.Columns[2].Name = "Poste"
-    $DataGridView.Columns[2].Width = 150
-    $DataGridView.Columns[3].Name = "SOP"
-    $DataGridView.Columns[3].Width = 200
-    $DataGridView.Columns[4].Name = "Page"
-    $DataGridView.Columns[4].Width = 150
+    $DataGridView.ColumnCount = 4
+    $DataGridView.Columns[0].Name = "March" + [char]233
+    $DataGridView.Columns[0].Width = 180
+    $DataGridView.Columns[1].Name = "Poste"
+    $DataGridView.Columns[1].Width = 150
+    $DataGridView.Columns[2].Name = "SOP"
+    $DataGridView.Columns[2].Width = 200
+    $DataGridView.Columns[3].Name = "Page"
+    $DataGridView.Columns[3].Width = 150
 
     # En-tête
     $DataGridView.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::DarkBlue
@@ -374,8 +399,14 @@ function Show-SearchGui {
                 $Poste = $Entry.SelectSingleNode("Poste").InnerText
                 $Archive = $Entry.SelectSingleNode("SOP").InnerText
                 $Fichier = $Entry.SelectSingleNode("Page").InnerText
+                
+                # Extraire le numéro de page de "slide1.xml" → 1
+                $PageNumber = ""
+                if ($Fichier -match 'slide(\d+)') {
+                    $PageNumber = $Matches[1]
+                }
 
-                $DataGridView.Rows.Add($Reference, $Affaire, $Poste, $Archive, $Fichier)
+                $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber)
                 $FoundCount++
             }
         }
@@ -394,6 +425,93 @@ function Show-SearchGui {
     $TextBox.Add_KeyDown({
         if ($_.KeyCode -eq "Return") {
             $SearchButton.PerformClick()
+        }
+    })
+
+    # Événement double-clic sur une cellule de la colonne SOP pour ouvrir le fichier
+    $DataGridView.Add_CellDoubleClick({
+        if ($_.ColumnIndex -eq 2) {  # Colonne 2 = SOP
+            $RowIndex = $_.RowIndex
+            $SopName = $DataGridView.Rows[$RowIndex].Cells[2].Value
+            $PageNum = $DataGridView.Rows[$RowIndex].Cells[3].Value
+            
+            if ($PptxPaths.ContainsKey($SopName)) {
+                $FilePath = $PptxPaths[$SopName]
+                if (Test-Path $FilePath) {
+                    try {
+                        # Ouvrir le fichier PPTX avec PowerPoint
+                        if ([int]::TryParse($PageNum, [ref]$null)) {
+                            # Ouvrir à la page spécifique (numéro de slide)
+                            $PowerPoint = New-Object -ComObject PowerPoint.Application
+                            $PowerPoint.Visible = $true
+                            
+                            # Ouvrir la présentation
+                            $Presentation = $PowerPoint.Presentations.Open(
+                                $FilePath,                                          # FileName
+                                [Microsoft.Office.Core.MsoTriState]::msoTrue,      # LinkToFile
+                                [Microsoft.Office.Core.MsoTriState]::msoTrue,      # SaveWithDocument
+                                [Microsoft.Office.Core.MsoTriState]::msoTrue       # Untitled
+                            )
+                            
+                            # Attendre un peu que PowerPoint charge complètement
+                            Start-Sleep -Milliseconds 1000
+                            
+                            # Aller à la slide spécifique
+                            $SlideIndex = [int]$PageNum
+                            if ($SlideIndex -le $Presentation.Slides.Count -and $SlideIndex -gt 0) {
+                                try {
+                                    # S'assurer que nous sommes en mode Normal View
+                                    $PowerPoint.ActiveWindow.ViewType = 1  # 1 = ppViewNormal
+                                    
+                                    # Sélectionner la slide
+                                    $Presentation.Slides($SlideIndex).Select()
+                                    
+                                    # Attendre un peu plus
+                                    Start-Sleep -Milliseconds 500
+                                    
+                                    # Forcer le refresh de la vue
+                                    $PowerPoint.ActiveWindow.Activate()
+                                }
+                                catch {
+                                    # Si ça ne fonctionne pas, juste ouvrir le fichier normalement
+                                    [System.Windows.Forms.MessageBox]::Show("Impossible d'aller à la slide $SlideIndex. Le fichier s'ouvre à la slide 1.", "Info", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+                                }
+                            }
+                        } else {
+                            # Ouvrir simplement le fichier si pas de numéro de page
+                            Invoke-Item $FilePath
+                        }
+                    }
+                    catch {
+                        # En cas d'erreur avec PowerPoint COM, utiliser Invoke-Item
+                        try {
+                            Invoke-Item $FilePath
+                        }
+                        catch {
+                            [System.Windows.Forms.MessageBox]::Show("Erreur: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                        }
+                    }
+                } else {
+                    [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Chemin non trouve pour: $SopName", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            }
+        }
+    })
+
+    # Événement MouseMove pour afficher le chemin du fichier en survolant la colonne SOP
+    $DataGridView.Add_MouseMove({
+        $HitTest = $DataGridView.HitTest($_.X, $_.Y)
+        
+        if ($HitTest.ColumnIndex -eq 2 -and $HitTest.RowIndex -ge 0) {
+            $SopName = $DataGridView.Rows[$HitTest.RowIndex].Cells[2].Value
+            if ($PptxPaths.ContainsKey($SopName)) {
+                $Form.Text = "Chemin: " + $PptxPaths[$SopName]
+            }
+        } else {
+            $SearchCount = $DataGridView.Rows.Count
+            $Form.Text = "Recherche de References - Projet Iveco [$SearchCount resultat(s)]"
         }
     })
 
