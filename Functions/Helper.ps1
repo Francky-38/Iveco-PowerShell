@@ -280,38 +280,28 @@ function Show-SearchGui {
     
     # Dictionnaire pour stocker les chemins des fichiers PPTX
     $PptxPaths = @{}
-    
-    # Dictionnaire pour stocker les numéros de page
-    $PageNumbers = @{}
 
-    # Charger les chemins et les numéros de page dans les dictionnaires
+    # Charger les chemins dans le dictionnaire
     foreach ($Entry in $AllEntries) {
         $Path = $Entry.SelectSingleNode("Path").InnerText
         $Archive = $Entry.SelectSingleNode("SOP").InnerText
-        $PageFile = $Entry.SelectSingleNode("Page").InnerText
         
         if (-not $PptxPaths.ContainsKey($Archive)) {
             $PptxPaths[$Archive] = $Path
-        }
-        
-        # Extraire le numéro de page de "slide1.xml" → 1
-        $PageKey = "$Archive|$PageFile"
-        if ($PageFile -match 'slide(\d+)') {
-            $PageNumbers[$PageKey] = [int]$Matches[1]
         }
     }
 
     # Créer la fenêtre principale
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "Recherche de References - Projet Iveco"
-    $Form.Size = New-Object System.Drawing.Size(900, 600)
+    $Form.Size = New-Object System.Drawing.Size(1120, 550)
     $Form.StartPosition = "CenterScreen"
     $Form.BackColor = [System.Drawing.Color]::WhiteSmoke
 
     # Panel supérieur (recherche)
     $SearchPanel = New-Object System.Windows.Forms.Panel
     $SearchPanel.Location = New-Object System.Drawing.Point(10, 10)
-    $SearchPanel.Size = New-Object System.Drawing.Size(880, 60)
+    $SearchPanel.Size = New-Object System.Drawing.Size(1080, 60)
     $SearchPanel.BackColor = [System.Drawing.Color]::White
     $SearchPanel.BorderStyle = "Fixed3D"
 
@@ -354,7 +344,7 @@ function Show-SearchGui {
     # DataGridView pour les résultats
     $DataGridView = New-Object System.Windows.Forms.DataGridView
     $DataGridView.Location = New-Object System.Drawing.Point(10, 80)
-    $DataGridView.Size = New-Object System.Drawing.Size(880, 510)
+    $DataGridView.Size = New-Object System.Drawing.Size(1080, 410)
     $DataGridView.AllowUserToAddRows = $false
     $DataGridView.AllowUserToDeleteRows = $false
     $DataGridView.ReadOnly = $true
@@ -366,13 +356,13 @@ function Show-SearchGui {
     # Ajouter les colonnes
     $DataGridView.ColumnCount = 4
     $DataGridView.Columns[0].Name = "March" + [char]233
-    $DataGridView.Columns[0].Width = 180
+    $DataGridView.Columns[0].Width = 450
     $DataGridView.Columns[1].Name = "Poste"
-    $DataGridView.Columns[1].Width = 150
+    $DataGridView.Columns[1].Width = 330
     $DataGridView.Columns[2].Name = "SOP"
     $DataGridView.Columns[2].Width = 200
     $DataGridView.Columns[3].Name = "Page"
-    $DataGridView.Columns[3].Width = 150
+    $DataGridView.Columns[3].Width = 50
 
     # En-tête
     $DataGridView.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::DarkBlue
@@ -433,57 +423,17 @@ function Show-SearchGui {
         if ($_.ColumnIndex -eq 2) {  # Colonne 2 = SOP
             $RowIndex = $_.RowIndex
             $SopName = $DataGridView.Rows[$RowIndex].Cells[2].Value
-            $PageNum = $DataGridView.Rows[$RowIndex].Cells[3].Value
+            $PageNum = [int]$DataGridView.Rows[$RowIndex].Cells[3].Value
             
             if ($PptxPaths.ContainsKey($SopName)) {
                 $FilePath = $PptxPaths[$SopName]
                 if (Test-Path $FilePath) {
                     try {
-                        # Créer un paramètre avec le numéro de page
-                        $Arguments = "`"$FilePath`""
-                        
-                        # Lancer PowerPoint avec le fichier (et optionnellement la page)
-                        Start-Process -FilePath "powerpnt.exe" -ArgumentList $Arguments
-                        
-                        # En arrière-plan, essayer de naviguer si le numéro est valide
-                        $SlideIndex = 0
-                        if ([int]::TryParse($PageNum, [ref]$SlideIndex)) {
-                            # Créer une job asynchrone pour la navigation
-                            $NavigationScript = {
-                                param($FilePath, $SlideNum)
-                                
-                                Start-Sleep -Milliseconds 500
-                                
-                                try {
-                                    $PowerPoint = New-Object -ComObject PowerPoint.Application
-                                    
-                                    # Chercher la présentation ouverte
-                                    $Presentation = $null
-                                    foreach ($Pres in $PowerPoint.Presentations) {
-                                        if ($Pres.FullName -eq $FilePath) {
-                                            $Presentation = $Pres
-                                            break
-                                        }
-                                    }
-                                    
-                                    if ($Presentation -and $SlideNum -le $Presentation.Slides.Count -and $SlideNum -gt 0) {
-                                        # S'assurer qu'on est en Normal View
-                                        $PowerPoint.ActiveWindow.ViewType = 1
-                                        
-                                        # Attendre un peu
-                                        Start-Sleep -Milliseconds 200
-                                        
-                                        # Naviguer à la slide
-                                        $Presentation.Slides($SlideNum).Select()
-                                    }
-                                }
-                                catch {
-                                    # Silencieusement ignorer les erreurs de navigation
-                                }
-                            }
-                            
-                            Start-Job -ScriptBlock $NavigationScript -ArgumentList $FilePath, $SlideIndex | Out-Null
-                        }
+                        # Ouvrir le fichier PPTX avec l'application par défaut et aller à la page spécifiée
+                        $pp = New-Object -ComObject PowerPoint.Application
+                        $pp.Visible = -1
+                        $pp.Presentations.Open($FilePath)
+                        $pp.ActiveWindow.View.GotoSlide($PageNum)
                     }
                     catch {
                         [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
