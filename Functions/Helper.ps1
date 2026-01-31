@@ -281,16 +281,6 @@ function Show-SearchGui {
     # Dictionnaire pour stocker les chemins des fichiers PPTX
     $PptxPaths = @{}
 
-    # Charger les chemins dans le dictionnaire
-    foreach ($Entry in $AllEntries) {
-        $Path = $Entry.SelectSingleNode("Path").InnerText
-        $Archive = $Entry.SelectSingleNode("SOP").InnerText
-        
-        if (-not $PptxPaths.ContainsKey($Archive)) {
-            $PptxPaths[$Archive] = $Path
-        }
-    }
-
     # Créer la fenêtre principale
     $Form = New-Object System.Windows.Forms.Form
     $Form.Text = "Recherche de References - Projet Iveco"
@@ -397,6 +387,8 @@ function Show-SearchGui {
                 }
 
                 $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber)
+                $Path = $Entry.SelectSingleNode("Path").InnerText
+                $PptxPaths[$FoundCount] = $Path
                 $FoundCount++
             }
         }
@@ -423,17 +415,13 @@ function Show-SearchGui {
         if ($_.ColumnIndex -eq 2) {  # Colonne 2 = SOP
             $RowIndex = $_.RowIndex
             $SopName = $DataGridView.Rows[$RowIndex].Cells[2].Value
-            $PageNum = [int]$DataGridView.Rows[$RowIndex].Cells[3].Value
             
-            if ($PptxPaths.ContainsKey($SopName)) {
-                $FilePath = $PptxPaths[$SopName]
+            if ($PptxPaths.ContainsKey($RowIndex)) {
+                $FilePath = $PptxPaths[$RowIndex]
+                
                 if (Test-Path $FilePath) {
                     try {
-                        # Ouvrir le fichier PPTX avec l'application par défaut et aller à la page spécifiée
-                        $pp = New-Object -ComObject PowerPoint.Application
-                        $pp.Visible = -1
-                        $pp.Presentations.Open($FilePath)
-                        $pp.ActiveWindow.View.GotoSlide($PageNum)
+                        Invoke-Item $FilePath
                     }
                     catch {
                         [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
@@ -452,10 +440,10 @@ function Show-SearchGui {
         $HitTest = $DataGridView.HitTest($_.X, $_.Y)
         
         if ($HitTest.ColumnIndex -eq 2 -and $HitTest.RowIndex -ge 0) {
-            $SopName = $DataGridView.Rows[$HitTest.RowIndex].Cells[2].Value
+            $RowIndex = $HitTest.RowIndex
             $PageNum = $DataGridView.Rows[$HitTest.RowIndex].Cells[3].Value
-            if ($PptxPaths.ContainsKey($SopName)) {
-                $Form.Text = "Chemin: " + $PptxPaths[$SopName] + " | Page: " + $PageNum
+            if ($PptxPaths.ContainsKey($RowIndex)) {
+                $Form.Text = "Chemin: " + $PptxPaths[$RowIndex] + " | Page: " + $PageNum
             }
         } else {
             $SearchCount = $DataGridView.Rows.Count
