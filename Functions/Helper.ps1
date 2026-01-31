@@ -446,12 +446,16 @@ function Show-SearchGui {
                         $pp.Visible = -1
                         $presentation = $pp.Presentations.Open($FilePath)
                         $pp.ActiveWindow.View.GotoSlide($index)
-
-                        
-                        #Invoke-Item $FilePath
                     }
                     catch {
                         [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                    }
+                    finally {
+                        # Libérer les objets COM
+                        if ($presentation) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($presentation) | Out-Null }
+                        if ($pp) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pp) | Out-Null }
+                        [GC]::Collect()
+                        [GC]::WaitForPendingFinalizers()
                     }
                 } else {
                     [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
