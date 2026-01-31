@@ -433,6 +433,34 @@ function Show-SearchGui {
                 [System.Windows.Forms.MessageBox]::Show("Chemin non trouve pour: $SopName", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
             }
         }
+        if ($_.ColumnIndex -eq 3) {  # Colonne 3 = Page
+            $RowIndex = $_.RowIndex
+            $SopName = $DataGridView.Rows[$RowIndex].Cells[2].Value
+            $index=$DataGridView.Rows[$RowIndex].Cells[3].Value
+            if ($PptxPaths.ContainsKey($RowIndex)) {
+                $FilePath = $PptxPaths[$RowIndex]
+                
+                if (Test-Path $FilePath) {
+                    try {
+                        $pp = New-Object -ComObject PowerPoint.Application
+                        $pp.Visible = -1
+                        $presentation = $pp.Presentations.Open($FilePath)
+                        $pp.ActiveWindow.View.GotoSlide($index)
+
+                        
+                        #Invoke-Item $FilePath
+                    }
+                    catch {
+                        [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                    }
+                } else {
+                    [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Chemin non trouve pour: $SopName", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            }
+        }
+        
     })
 
     # Événement MouseMove pour afficher le chemin du fichier en survolant la colonne SOP
