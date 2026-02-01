@@ -87,7 +87,6 @@ function Export-PptxReferencesFromTree {
 
     $TotalReferences = 0
     $TotalFiles = 0
-    $TempDir = Join-Path -Path $env:TEMP -ChildPath "PPTX_Extract_$(Get-Random)"
 
     try {
         Write-Host "Recherche des dossiers Affaires (SA, SB)..." -ForegroundColor Yellow
@@ -130,33 +129,30 @@ function Export-PptxReferencesFromTree {
                             Write-Host "      [$TotalFiles] Traitement: $($PptxFile.Name)" -ForegroundColor Gray
 
                             try {
-                                # Créer un dossier temporaire unique pour chaque fichier
-                                $FileTempDir = Join-Path -Path $env:TEMP -ChildPath "PPTX_Extract_$(Get-Random)"
-                                New-Item -ItemType Directory -Path $FileTempDir -Force | Out-Null
-
-                                # Extraire l'archive PPTX
+                                # Ouvrir l'archive PPTX sans l'extraire
                                 Add-Type -AssemblyName System.IO.Compression.FileSystem
-                                [System.IO.Compression.ZipFile]::ExtractToDirectory($PptxFile.FullName, $FileTempDir)
-
-                                # Parcourir les fichiers XML dans ppt\slides
-                                $SlidesPath = Join-Path -Path $FileTempDir -ChildPath "ppt\slides"
-
-                                if (Test-Path -Path $SlidesPath) {
-                                    $XmlFiles = Get-ChildItem -Path $SlidesPath -Filter "*.xml" -ErrorAction SilentlyContinue
-
-                                    foreach ($XmlFile in $XmlFiles) {
+                                $ZipArchive = [System.IO.Compression.ZipFile]::OpenRead($PptxFile.FullName)
+                                
+                                try {
+                                    # Récupérer les fichiers XML des slides directement depuis l'archive
+                                    $SlidesEntries = $ZipArchive.Entries | Where-Object { $_.FullName -like "ppt/slides/slide*.xml" }
+                                    
+                                    foreach ($SlideEntry in $SlidesEntries) {
                                         try {
+                                            # Lire le contenu XML directement depuis le stream sans passer par le disque
+                                            $Stream = $SlideEntry.Open()
                                             $XmlContent = [System.Xml.XmlDocument]::new()
-                                            $XmlContent.Load($XmlFile.FullName)
-
+                                            $XmlContent.Load($Stream)
+                                            $Stream.Close()
+                                            
                                             # Récupérer tous les nœuds <a:t> avec gestion du namespace
                                             $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($XmlContent.NameTable)
                                             $NamespaceManager.AddNamespace("a", "http://schemas.openxmlformats.org/drawingml/2006/main")
                                             $TextNodes = $XmlContent.SelectNodes("//a:t", $NamespaceManager)
-
+                                            
                                             foreach ($TextNode in $TextNodes) {
                                                 $Text = $TextNode.InnerText.Trim()
-
+                                                
                                                 # Chercher toutes les références dans le texte
                                                 # Format: [TRS]?\d{5,10} (peut être au milieu d'une chaîne)
                                                 $References = [regex]::Matches($Text, '[TRS]?\d{5,10}')
@@ -169,48 +165,49 @@ function Export-PptxReferencesFromTree {
                                                     $PosteNom = $PosteFolder.Name
                                                     
                                                     $Entry = $XmlOutput.CreateElement("Entree")
-
+                                                    
                                                     $PathElem = $XmlOutput.CreateElement("Path")
                                                     $PathElem.InnerText = $PptxFile.FullName
                                                     $Entry.AppendChild($PathElem) | Out-Null
-
+                                                    
                                                     $AffaireElem = $XmlOutput.CreateElement("Affaire")
                                                     $AffaireElem.InnerText = $AffaireNom
                                                     $Entry.AppendChild($AffaireElem) | Out-Null
-
+                                                    
                                                     $PosteElem = $XmlOutput.CreateElement("Poste")
                                                     $PosteElem.InnerText = $PosteNom
                                                     $Entry.AppendChild($PosteElem) | Out-Null
-
+                                                    
                                                     $NameElem = $XmlOutput.CreateElement("SOP")
                                                     $NameElem.InnerText = $PptxFile.Name
                                                     $Entry.AppendChild($NameElem) | Out-Null
-
+                                                    
                                                     $FileElem = $XmlOutput.CreateElement("Page")
-                                                    $FileElem.InnerText = $XmlFile.Name
+                                                    $FileElem.InnerText = $SlideEntry.Name
                                                     $Entry.AppendChild($FileElem) | Out-Null
-
+                                                    
                                                     $DateModElem = $XmlOutput.CreateElement("DateModification")
                                                     $DateModElem.InnerText = $PptxFile.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
                                                     $Entry.AppendChild($DateModElem) | Out-Null
-
+                                                    
                                                     $RefElem = $XmlOutput.CreateElement("Reference")
                                                     $RefElem.InnerText = $Reference
                                                     $Entry.AppendChild($RefElem) | Out-Null
-
+                                                    
                                                     $Root.AppendChild($Entry) | Out-Null
                                                     $TotalReferences++
                                                 }
                                             }
                                         }
                                         catch {
-                                            Write-Host "      Erreur lors du traitement de $($XmlFile.Name): $_" -ForegroundColor Red
+                                            Write-Host "      Erreur lors du traitement de $($SlideEntry.Name): $_" -ForegroundColor Red
                                         }
                                     }
                                 }
-
-                                # Nettoyer le dossier temporaire pour ce fichier
-                                Remove-Item -Path $FileTempDir -Recurse -Force -ErrorAction SilentlyContinue
+                                finally {
+                                    # Fermer l'archive
+                                    if ($ZipArchive) { $ZipArchive.Dispose() }
+                                }
                             }
                             catch {
                                 Write-Host "    Erreur lors du traitement de $($PptxFile.Name): $_" -ForegroundColor Red
@@ -243,8 +240,7 @@ function Export-PptxReferencesFromTree {
         Write-Host "Erreur lors du traitement: $_" -ForegroundColor Red
     }
     finally {
-        # Nettoyer le dossier temporaire principal
-        Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+        # Aucun nettoyage nécessaire (lecture directe sans extraction)
     }
 }
 
