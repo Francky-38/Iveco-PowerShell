@@ -12,6 +12,32 @@
     Get-WelcomeMessage -Message "Bienvenue!"
 #>
 
+<#
+.SYNOPSIS
+    Récupère la version du projet depuis les tags Git
+
+.DESCRIPTION
+    Utilise git describe pour obtenir le tag le plus récent du projet
+
+.EXAMPLE
+    Get-ProjectVersion
+#>
+
+function Get-ProjectVersion {
+    try {
+        # Récupérer le dernier tag Git
+        $latestTag = git describe --tags --abbrev=0 2>$null
+        if ($latestTag) {
+            # Nettoyer le 'v' du début si présent
+            return $latestTag -replace '^v', ''
+        }
+    }
+    catch {
+        # En cas d'erreur, retourner une version par défaut
+    }
+    return "4"
+}
+
 function Get-WelcomeMessage {
     param(
         [string]$Message = "Bienvenue dans le projet Iveco!"
@@ -283,8 +309,9 @@ function Show-SearchGui {
     $AllEntries = $XmlContent.SelectNodes("//Entree")
 
     # Créer la fenêtre principale
+    $Version = Get-ProjectVersion
     $Form = New-Object System.Windows.Forms.Form
-    $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence"
+    $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence - V$Version"
     $Form.Size = New-Object System.Drawing.Size(1220, 550)
     $Form.StartPosition = "CenterScreen"
     $Form.BackColor = [System.Drawing.Color]::WhiteSmoke
@@ -295,6 +322,10 @@ function Show-SearchGui {
     $SearchPanel.Size = New-Object System.Drawing.Size(1180, 60)
     $SearchPanel.BackColor = [System.Drawing.Color]::White
     $SearchPanel.BorderStyle = "Fixed3D"
+    
+    # Ajouter une info-bulle sur le SearchPanel avec le nom du développeur
+    $ToolTip = New-Object System.Windows.Forms.ToolTip
+    $ToolTip.SetToolTip($SearchPanel, "D" + [char]233 + "velopp" + [char]233 + " par : Franck Ginhoux")
 
     # Label
     $Label = New-Object System.Windows.Forms.Label
