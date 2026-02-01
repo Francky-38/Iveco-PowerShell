@@ -190,6 +190,10 @@ function Export-PptxReferencesFromTree {
                                                     $FileElem.InnerText = $XmlFile.Name
                                                     $Entry.AppendChild($FileElem) | Out-Null
 
+                                                    $DateModElem = $XmlOutput.CreateElement("DateModification")
+                                                    $DateModElem.InnerText = $PptxFile.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+                                                    $Entry.AppendChild($DateModElem) | Out-Null
+
                                                     $RefElem = $XmlOutput.CreateElement("Reference")
                                                     $RefElem.InnerText = $Reference
                                                     $Entry.AppendChild($RefElem) | Out-Null
@@ -277,21 +281,18 @@ function Show-SearchGui {
     $XmlContent = [System.Xml.XmlDocument]::new()
     $XmlContent.Load($XmlPath)
     $AllEntries = $XmlContent.SelectNodes("//Entree")
-    
-    # Dictionnaire pour stocker les chemins des fichiers PPTX
-    $PptxPaths = @{}
 
     # Créer la fenêtre principale
     $Form = New-Object System.Windows.Forms.Form
-    $Form.Text = "Recherche de References - Projet Iveco"
-    $Form.Size = New-Object System.Drawing.Size(1120, 550)
+    $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence"
+    $Form.Size = New-Object System.Drawing.Size(1220, 550)
     $Form.StartPosition = "CenterScreen"
     $Form.BackColor = [System.Drawing.Color]::WhiteSmoke
 
     # Panel supérieur (recherche)
     $SearchPanel = New-Object System.Windows.Forms.Panel
     $SearchPanel.Location = New-Object System.Drawing.Point(10, 10)
-    $SearchPanel.Size = New-Object System.Drawing.Size(1080, 60)
+    $SearchPanel.Size = New-Object System.Drawing.Size(1180, 60)
     $SearchPanel.BackColor = [System.Drawing.Color]::White
     $SearchPanel.BorderStyle = "Fixed3D"
 
@@ -334,7 +335,7 @@ function Show-SearchGui {
     # DataGridView pour les résultats
     $DataGridView = New-Object System.Windows.Forms.DataGridView
     $DataGridView.Location = New-Object System.Drawing.Point(10, 80)
-    $DataGridView.Size = New-Object System.Drawing.Size(1080, 410)
+    $DataGridView.Size = New-Object System.Drawing.Size(1180, 410)
     $DataGridView.AllowUserToAddRows = $false
     $DataGridView.AllowUserToDeleteRows = $false
     $DataGridView.ReadOnly = $true
@@ -344,15 +345,19 @@ function Show-SearchGui {
     $DataGridView.Font = New-Object System.Drawing.Font("Arial", 9)
 
     # Ajouter les colonnes
-    $DataGridView.ColumnCount = 4
+    $DataGridView.ColumnCount = 6
     $DataGridView.Columns[0].Name = "March" + [char]233
     $DataGridView.Columns[0].Width = 450
     $DataGridView.Columns[1].Name = "Poste"
-    $DataGridView.Columns[1].Width = 330
+    $DataGridView.Columns[1].Width = 300
     $DataGridView.Columns[2].Name = "SOP"
     $DataGridView.Columns[2].Width = 200
     $DataGridView.Columns[3].Name = "Page"
     $DataGridView.Columns[3].Width = 50
+    $DataGridView.Columns[4].Name = "Date"
+    $DataGridView.Columns[4].Width = 130
+    $DataGridView.Columns[5].Name = "PathPptx"
+    $DataGridView.Columns[5].Visible = $false  # Masquer cette colonne
 
     # En-tête
     $DataGridView.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::DarkBlue
@@ -379,6 +384,8 @@ function Show-SearchGui {
                 $Poste = $Entry.SelectSingleNode("Poste").InnerText
                 $Archive = $Entry.SelectSingleNode("SOP").InnerText
                 $Fichier = $Entry.SelectSingleNode("Page").InnerText
+                $DateMod = $Entry.SelectSingleNode("DateModification").InnerText
+                $Path = $Entry.SelectSingleNode("Path").InnerText
                 
                 # Extraire le numéro de page de "slide1.xml" → 1
                 $PageNumber = ""
@@ -386,12 +393,13 @@ function Show-SearchGui {
                     $PageNumber = $Matches[1]
                 }
 
-                $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber)
-                $Path = $Entry.SelectSingleNode("Path").InnerText
-                $PptxPaths[$FoundCount] = $Path
+                $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber, $DateMod, $Path)
                 $FoundCount++
             }
         }
+
+        # Trier par DateModification (décroissant - plus récentes en haut)
+        $DataGridView.Sort($DataGridView.Columns["Date"], [System.ComponentModel.ListSortDirection]::Descending)
 
         $Form.Text = "Recherche de References - Projet Iveco [$FoundCount resultat(s)]"
     })
@@ -412,77 +420,66 @@ function Show-SearchGui {
 
     # Événement double-clic sur une cellule de la colonne SOP pour ouvrir le fichier
     $DataGridView.Add_CellDoubleClick({
-        if ($_.ColumnIndex -eq 2) {  # Colonne 2 = SOP
+        if ($_.ColumnIndex -le 2) {  # Colonne 2 = SOP
             $RowIndex = $_.RowIndex
-            $SopName = $DataGridView.Rows[$RowIndex].Cells[2].Value
+            $FilePath = $DataGridView.Rows[$RowIndex].Cells[5].Value
             
-            if ($PptxPaths.ContainsKey($RowIndex)) {
-                $FilePath = $PptxPaths[$RowIndex]
-                
-                if (Test-Path $FilePath) {
-                    try {
-                        Invoke-Item $FilePath
-                    }
-                    catch {
-                        [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                    }
-                } else {
-                    [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            if (Test-Path $FilePath) {
+                try {
+                    Invoke-Item $FilePath
+                }
+                catch {
+                    [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
                 }
             } else {
-                [System.Windows.Forms.MessageBox]::Show("Chemin non trouve pour: $SopName", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
             }
         }
         if ($_.ColumnIndex -eq 3) {  # Colonne 3 = Page
             $RowIndex = $_.RowIndex
-            $SopName = $DataGridView.Rows[$RowIndex].Cells[2].Value
+            $FilePath = $DataGridView.Rows[$RowIndex].Cells[5].Value
             $index=$DataGridView.Rows[$RowIndex].Cells[3].Value
-            if ($PptxPaths.ContainsKey($RowIndex)) {
-                $FilePath = $PptxPaths[$RowIndex]
-                
-                if (Test-Path $FilePath) {
-                    try {
-                        $pp = New-Object -ComObject PowerPoint.Application
-                        $pp.Visible = -1
-                        $presentation = $pp.Presentations.Open($FilePath)
-                        $pp.ActiveWindow.View.GotoSlide($index)
-                    }
-                    catch {
-                        [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-                    }
-                    finally {
-                        # Libérer les objets COM
-                        if ($presentation) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($presentation) | Out-Null }
-                        if ($pp) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pp) | Out-Null }
-                        [GC]::Collect()
-                        [GC]::WaitForPendingFinalizers()
-                    }
-                } else {
-                    [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            
+            if (Test-Path $FilePath) {
+                try {
+                    $pp = New-Object -ComObject PowerPoint.Application
+                    $pp.Visible = -1
+                    $presentation = $pp.Presentations.Open($FilePath)
+                    $pp.ActiveWindow.View.GotoSlide($index)
+                }
+                catch {
+                    [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                }
+                finally {
+                    # Libérer les objets COM
+                    if ($presentation) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($presentation) | Out-Null }
+                    if ($pp) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pp) | Out-Null }
+                    [GC]::Collect()
+                    [GC]::WaitForPendingFinalizers()
                 }
             } else {
-                [System.Windows.Forms.MessageBox]::Show("Chemin non trouve pour: $SopName", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
             }
         }
         
     })
 
-    # Événement MouseMove pour afficher le chemin du fichier en survolant la colonne SOP
+    <# Événement MouseMove pour afficher le chemin du fichier en survolant la colonne SOP
     $DataGridView.Add_MouseMove({
         $HitTest = $DataGridView.HitTest($_.X, $_.Y)
         
         if ($HitTest.ColumnIndex -eq 2 -and $HitTest.RowIndex -ge 0) {
             $RowIndex = $HitTest.RowIndex
             $PageNum = $DataGridView.Rows[$HitTest.RowIndex].Cells[3].Value
-            if ($PptxPaths.ContainsKey($RowIndex)) {
-                $Form.Text = "Chemin: " + $PptxPaths[$RowIndex] + " | Page: " + $PageNum
-            }
+            $FilePath = $DataGridView.Rows[$HitTest.RowIndex].Cells[5].Value
+            $Form.Text = "Chemin: " + $FilePath + " | Page: " + $PageNum
         } else {
             $SearchCount = $DataGridView.Rows.Count
             $Form.Text = "Recherche de References - Projet Iveco [$SearchCount resultat(s)]"
         }
     })
-
+    #>
+    
     # Ajouter les contrôles à la forme
     $Form.Controls.Add($SearchPanel)
     $Form.Controls.Add($DataGridView)
