@@ -88,7 +88,8 @@ function Get-SystemInfo {
 function Export-PptxReferencesFromTree {
     param(
         [string]$RootPath = "D:\W\Iveco\serveur",
-        [string]$OutputFile = ""
+        [string]$OutputFile = "",
+        [string]$SubPathStructure = "01-Dossiers ligne EL-EG\LIGNE EG0"
     )
 
     # Vérifier que le chemin existe
@@ -134,7 +135,13 @@ function Export-PptxReferencesFromTree {
             Write-Host "Exploration Affaire: $($AffaireFolder.Name)" -ForegroundColor Cyan
             
             # Construire le chemin vers les dossiers postes
-            $PostesPath = Join-Path -Path $AffaireFolder.FullName -ChildPath "01-Dossiers ligne EL-EG\LIGNE EG0"
+            if ([string]::IsNullOrEmpty($SubPathStructure)) {
+                # Si SubPathStructure est vide, chercher directement dans le dossier d'affaires
+                $PostesPath = $AffaireFolder.FullName
+            } else {
+                # Sinon, utiliser le chemin spécifié
+                $PostesPath = Join-Path -Path $AffaireFolder.FullName -ChildPath $SubPathStructure
+            }
             
             if (Test-Path -Path $PostesPath) {
                 # Étape 3: Chercher les dossiers de postes (1er niveau, pas récursif)
@@ -290,7 +297,8 @@ function Export-PptxReferencesFromTree {
                     }
                 }
             } else {
-                Write-Host "  Attention: Chemin '01-Dossiers ligne EL-EG\LIGNE EG0' non trouve" -ForegroundColor Yellow
+                $PathDisplay = if ([string]::IsNullOrEmpty($SubPathStructure)) { "le dossier d'affaires" } else { "'$SubPathStructure'" }
+                Write-Host "  Attention: Chemin $PathDisplay non trouve" -ForegroundColor Yellow
             }
         }
         
