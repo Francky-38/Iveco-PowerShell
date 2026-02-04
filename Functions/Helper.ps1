@@ -304,11 +304,48 @@ function Export-PptxReferencesFromTree {
         # Sauvegarder le fichier XML
         $XmlOutput.Save($OutputFile)
         
+        # Zipper le fichier XML pour économiser de la place
+        try {
+            $ZipPath = $OutputFile -replace '\.xml$', '.zip'
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            
+            # Supprimer le ZIP existant s'il existe
+            if (Test-Path -Path $ZipPath) {
+                Remove-Item -Path $ZipPath -Force
+            }
+            
+            # Créer l'archive ZIP et ajouter le fichier XML
+            $ZipArchive = [System.IO.Compression.ZipFile]::Open($ZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+            
+            # Ajouter le fichier XML au ZIP
+            $FileBytes = [System.IO.File]::ReadAllBytes($OutputFile)
+            $Entry = $ZipArchive.CreateEntry([System.IO.Path]::GetFileName($OutputFile))
+            $EntryStream = $Entry.Open()
+            $EntryStream.Write($FileBytes, 0, $FileBytes.Length)
+            $EntryStream.Close()
+            $ZipArchive.Dispose()
+            
+            # Calculer l'économie d'espace
+            $XmlSize = (Get-Item $OutputFile).Length
+            $ZipSize = (Get-Item $ZipPath).Length
+            $Saved = $XmlSize - $ZipSize
+            $SavedPercent = [math]::Round(($Saved / $XmlSize) * 100, 1)
+            
+            # Supprimer le fichier XML original
+            Remove-Item $OutputFile -Force
+            
+            Write-Host "  - Fichier XML compressé: $ZipPath" -ForegroundColor Cyan
+            Write-Host "  - Économie d'espace: $SavedPercent% ($([math]::Round($Saved / 1MB, 2)) MB)" -ForegroundColor Cyan
+        }
+        catch {
+            Write-Host "  Attention: Impossible de zipper le fichier XML: $_" -ForegroundColor Yellow
+        }
+        
         Write-Host ""
         Write-Host "OK - Traitement termine!" -ForegroundColor Green
         Write-Host "  - Fichiers PPTX traites: $TotalFiles" -ForegroundColor Cyan
         Write-Host "  - Nombre total de references extraites: $TotalReferences" -ForegroundColor Cyan
-        Write-Host "  - Fichier de sortie: $OutputFile" -ForegroundColor Cyan
+        Write-Host "  - Fichier de sortie: $ZipPath" -ForegroundColor Cyan
     }
     catch {
         Write-Host "Erreur lors du traitement: $_" -ForegroundColor Red
@@ -337,19 +374,48 @@ function Show-SearchGui {
         [string]$XmlPath
     )
 
-    # Vérifier que le fichier XML existe
-    if (-not (Test-Path -Path $XmlPath)) {
-        [System.Windows.Forms.MessageBox]::Show("Erreur: Le fichier XML '$XmlPath' n'existe pas", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-        return
-    }
-
     # Charger les assemblies
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    # Charger le fichier XML
+    # Vérifier que le fichier XML existe (ou son ZIP)
+    $ZipPath = $XmlPath -replace '\.xml$', '.zip'
+    if (-not ((Test-Path -Path $XmlPath) -or (Test-Path -Path $ZipPath))) {
+        [System.Windows.Forms.MessageBox]::Show("Erreur: Le fichier XML ou ZIP '$XmlPath' n'existe pas", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        return
+    }
+
+    # Charger le fichier XML (depuis le ZIP ou directement)
     $XmlContent = [System.Xml.XmlDocument]::new()
-    $XmlContent.Load($XmlPath)
+    
+    # Vérifier si un fichier ZIP existe (déjà défini au-dessus)
+    if (Test-Path -Path $ZipPath) {
+        # Lire le XML depuis le ZIP
+        try {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $ZipArchive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+            $XmlEntry = $ZipArchive.Entries | Where-Object { $_.Name -like "*.xml" } | Select-Object -First 1
+            if ($XmlEntry) {
+                $Stream = $XmlEntry.Open()
+                $XmlContent.Load($Stream)
+                $Stream.Close()
+            }
+            $ZipArchive.Dispose()
+        }
+        catch {
+            Write-Host "Erreur lors de la lecture du ZIP: $_" -ForegroundColor Red
+            return
+        }
+    }
+    elseif (Test-Path -Path $XmlPath) {
+        # Lire le XML directement si le ZIP n'existe pas
+        $XmlContent.Load($XmlPath)
+    }
+    else {
+        Write-Host "Erreur: Ni le fichier XML ni le ZIP n'existent a ce chemin: $XmlPath" -ForegroundColor Red
+        return
+    }
+    
     $AllEntries = $XmlContent.SelectNodes("//Entree")
 
     # Créer la fenêtre principale
@@ -519,7 +585,7 @@ function Show-SearchGui {
     $DataGridView.Add_CellDoubleClick({
         if ($_.ColumnIndex -le 2) {  # Colonne 2 = SOP
             $RowIndex = $_.RowIndex
-            $FilePath = $DataGridView.Rows[$RowIndex].Cells[5].Value
+            $FilePath = $DataGridView.Rows[$RowIndex].Cells[6].Value
             
             if (Test-Path $FilePath) {
                 try {
@@ -534,7 +600,7 @@ function Show-SearchGui {
         }
         if ($_.ColumnIndex -eq 3) {  # Colonne 3 = Page
             $RowIndex = $_.RowIndex
-            $FilePath = $DataGridView.Rows[$RowIndex].Cells[5].Value
+            $FilePath = $DataGridView.Rows[$RowIndex].Cells[6].Value
             $index=$DataGridView.Rows[$RowIndex].Cells[3].Value
             
             if (Test-Path $FilePath) {
@@ -568,7 +634,7 @@ function Show-SearchGui {
         if ($HitTest.ColumnIndex -eq 2 -and $HitTest.RowIndex -ge 0) {
             $RowIndex = $HitTest.RowIndex
             $PageNum = $DataGridView.Rows[$HitTest.RowIndex].Cells[3].Value
-            $FilePath = $DataGridView.Rows[$HitTest.RowIndex].Cells[5].Value
+            $FilePath = $DataGridView.Rows[$HitTest.RowIndex].Cells[6].Value
             $Form.Text = "Chemin: " + $FilePath + " | Page: " + $PageNum
         } else {
             $SearchCount = $DataGridView.Rows.Count
