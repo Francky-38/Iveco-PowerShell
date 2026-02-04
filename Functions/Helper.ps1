@@ -155,6 +155,20 @@ function Export-PptxReferencesFromTree {
                             Write-Host "      [$TotalFiles] Traitement: $($PptxFile.Name)" -ForegroundColor Gray
 
                             try {
+                                # Récupérer le propriétaire du fichier une seule fois
+                                $Owner = ""
+                                try {
+                                    $Acl = Get-Acl -Path $PptxFile.FullName
+                                    $Owner = $Acl.Owner
+                                    # Extraire uniquement le nom d'utilisateur (après le \)
+                                    if ($Owner -match '\\(.+)$') {
+                                        $Owner = $Matches[1]
+                                    }
+                                }
+                                catch {
+                                    $Owner = "Inconnu"
+                                }
+
                                 # Ouvrir l'archive PPTX sans l'extraire
                                 Add-Type -AssemblyName System.IO.Compression.FileSystem
                                 $ZipArchive = [System.IO.Compression.ZipFile]::OpenRead($PptxFile.FullName)
@@ -162,6 +176,9 @@ function Export-PptxReferencesFromTree {
                                 try {
                                     # Récupérer les fichiers XML des slides directement depuis l'archive
                                     $SlidesEntries = $ZipArchive.Entries | Where-Object { $_.FullName -like "ppt/slides/slide*.xml" }
+                                    
+                                    # Collecter tous les slides du fichier PPTX
+                                    $AllSlidesData = @()
                                     
                                     foreach ($SlideEntry in $SlidesEntries) {
                                         try {
@@ -176,6 +193,8 @@ function Export-PptxReferencesFromTree {
                                             $NamespaceManager.AddNamespace("a", "http://schemas.openxmlformats.org/drawingml/2006/main")
                                             $TextNodes = $XmlContent.SelectNodes("//a:t", $NamespaceManager)
                                             
+                                            # Collecter toutes les références de ce slide
+                                            $SlideReferences = @()
                                             foreach ($TextNode in $TextNodes) {
                                                 $Text = $TextNode.InnerText.Trim()
                                                 
@@ -185,49 +204,78 @@ function Export-PptxReferencesFromTree {
                                                 
                                                 foreach ($RefMatch in $References) {
                                                     $Reference = $RefMatch.Value
-                                                    
-                                                    # Les noms d'Affaire et Poste viennent des boucles actuelles
-                                                    $AffaireNom = $AffaireFolder.Name
-                                                    $PosteNom = $PosteFolder.Name
-                                                    
-                                                    $Entry = $XmlOutput.CreateElement("Entree")
-                                                    
-                                                    $PathElem = $XmlOutput.CreateElement("Path")
-                                                    $PathElem.InnerText = $PptxFile.FullName
-                                                    $Entry.AppendChild($PathElem) | Out-Null
-                                                    
-                                                    $AffaireElem = $XmlOutput.CreateElement("Affaire")
-                                                    $AffaireElem.InnerText = $AffaireNom
-                                                    $Entry.AppendChild($AffaireElem) | Out-Null
-                                                    
-                                                    $PosteElem = $XmlOutput.CreateElement("Poste")
-                                                    $PosteElem.InnerText = $PosteNom
-                                                    $Entry.AppendChild($PosteElem) | Out-Null
-                                                    
-                                                    $NameElem = $XmlOutput.CreateElement("SOP")
-                                                    $NameElem.InnerText = $PptxFile.Name
-                                                    $Entry.AppendChild($NameElem) | Out-Null
-                                                    
-                                                    $FileElem = $XmlOutput.CreateElement("Page")
-                                                    $FileElem.InnerText = $SlideEntry.Name
-                                                    $Entry.AppendChild($FileElem) | Out-Null
-                                                    
-                                                    $DateModElem = $XmlOutput.CreateElement("DateModification")
-                                                    $DateModElem.InnerText = $PptxFile.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
-                                                    $Entry.AppendChild($DateModElem) | Out-Null
-                                                    
-                                                    $RefElem = $XmlOutput.CreateElement("Reference")
-                                                    $RefElem.InnerText = $Reference
-                                                    $Entry.AppendChild($RefElem) | Out-Null
-                                                    
-                                                    $Root.AppendChild($Entry) | Out-Null
-                                                    $TotalReferences++
+                                                    $SlideReferences += $Reference
                                                 }
+                                            }
+                                            
+                                            # Ajouter les données du slide à la collection si des références ont été trouvées
+                                            if ($SlideReferences.Count -gt 0) {
+                                                $AllSlidesData += @{
+                                                    Name = $SlideEntry.Name
+                                                    References = $SlideReferences
+                                                }
+                                                $TotalReferences += $SlideReferences.Count
                                             }
                                         }
                                         catch {
                                             Write-Host "      Erreur lors du traitement de $($SlideEntry.Name): $_" -ForegroundColor Red
                                         }
+                                    }
+                                    
+                                    # Si des références ont été trouvées dans ce fichier PPTX, créer une seule entrée
+                                    if ($AllSlidesData.Count -gt 0) {
+                                        $AffaireNom = $AffaireFolder.Name
+                                        $PosteNom = $PosteFolder.Name
+                                        
+                                        $Entry = $XmlOutput.CreateElement("Entree")
+                                        
+                                        $PathElem = $XmlOutput.CreateElement("Path")
+                                        $PathElem.InnerText = $PptxFile.FullName
+                                        $Entry.AppendChild($PathElem) | Out-Null
+                                        
+                                        $AffaireElem = $XmlOutput.CreateElement("Affaire")
+                                        $AffaireElem.InnerText = $AffaireNom
+                                        $Entry.AppendChild($AffaireElem) | Out-Null
+                                        
+                                        $PosteElem = $XmlOutput.CreateElement("Poste")
+                                        $PosteElem.InnerText = $PosteNom
+                                        $Entry.AppendChild($PosteElem) | Out-Null
+                                        
+                                        $NameElem = $XmlOutput.CreateElement("SOP")
+                                        $NameElem.InnerText = $PptxFile.Name
+                                        $Entry.AppendChild($NameElem) | Out-Null
+                                        
+                                        $DateModElem = $XmlOutput.CreateElement("DateModification")
+                                        $DateModElem.InnerText = $PptxFile.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+                                        $Entry.AppendChild($DateModElem) | Out-Null
+                                        
+                                        $OwnerElem = $XmlOutput.CreateElement("Auteur")
+                                        $OwnerElem.InnerText = $Owner
+                                        $Entry.AppendChild($OwnerElem) | Out-Null
+                                        
+                                        # Créer la balise <Pages> contenant tous les slides de ce fichier
+                                        $PagesElem = $XmlOutput.CreateElement("Pages")
+                                        foreach ($SlideData in $AllSlidesData) {
+                                            $PageElem = $XmlOutput.CreateElement("Page")
+                                            
+                                            $PageNameElem = $XmlOutput.CreateElement("Name")
+                                            $PageNameElem.InnerText = $SlideData.Name
+                                            $PageElem.AppendChild($PageNameElem) | Out-Null
+                                            
+                                            # Créer la balise <References> pour ce slide
+                                            $ReferencesElem = $XmlOutput.CreateElement("References")
+                                            foreach ($Ref in $SlideData.References) {
+                                                $RefElem = $XmlOutput.CreateElement("Reference")
+                                                $RefElem.InnerText = $Ref
+                                                $ReferencesElem.AppendChild($RefElem) | Out-Null
+                                            }
+                                            $PageElem.AppendChild($ReferencesElem) | Out-Null
+                                            
+                                            $PagesElem.AppendChild($PageElem) | Out-Null
+                                        }
+                                        $Entry.AppendChild($PagesElem) | Out-Null
+                                        
+                                        $Root.AppendChild($Entry) | Out-Null
                                     }
                                 }
                                 finally {
@@ -378,19 +426,21 @@ function Show-SearchGui {
     $DataGridView.Font = New-Object System.Drawing.Font("Arial", 9)
 
     # Ajouter les colonnes
-    $DataGridView.ColumnCount = 6
+    $DataGridView.ColumnCount = 7
     $DataGridView.Columns[0].Name = "March" + [char]233
-    $DataGridView.Columns[0].Width = 450
+    $DataGridView.Columns[0].Width = 400
     $DataGridView.Columns[1].Name = "Poste"
-    $DataGridView.Columns[1].Width = 300
+    $DataGridView.Columns[1].Width = 250
     $DataGridView.Columns[2].Name = "SOP"
-    $DataGridView.Columns[2].Width = 200
+    $DataGridView.Columns[2].Width = 180
     $DataGridView.Columns[3].Name = "Page"
     $DataGridView.Columns[3].Width = 50
     $DataGridView.Columns[4].Name = "Date"
     $DataGridView.Columns[4].Width = 130
-    $DataGridView.Columns[5].Name = "PathPptx"
-    $DataGridView.Columns[5].Visible = $false  # Masquer cette colonne
+    $DataGridView.Columns[5].Name = "Auteur"
+    $DataGridView.Columns[5].Width = 120
+    $DataGridView.Columns[6].Name = "PathPptx"
+    $DataGridView.Columns[6].Visible = $false  # Masquer cette colonne
 
     # En-tête
     $DataGridView.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::DarkBlue
