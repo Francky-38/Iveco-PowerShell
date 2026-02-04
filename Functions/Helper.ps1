@@ -311,6 +311,12 @@ function Show-SearchGui {
     $Form.Size = New-Object System.Drawing.Size(1220, 550)
     $Form.StartPosition = "CenterScreen"
     $Form.BackColor = [System.Drawing.Color]::WhiteSmoke
+    
+    # Ajouter l'icône à la Form
+    $IconPath = "D:\W\Iveco\PowerShell\nono bleu.ico"
+    if (Test-Path -Path $IconPath) {
+        $Form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($IconPath)
+    }
 
     # Panel supérieur (recherche)
     $SearchPanel = New-Object System.Windows.Forms.Panel
@@ -427,15 +433,15 @@ function Show-SearchGui {
 
         # Trier par DateModification (décroissant - plus récentes en haut)
         $DataGridView.Sort($DataGridView.Columns["Date"], [System.ComponentModel.ListSortDirection]::Descending)
-
-        $Form.Text = "Recherche de References - Projet Iveco [$FoundCount resultat(s)]"
+        $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence [$FoundCount resultat(s)] V$Version"
+    
     })
 
     # Événement du bouton Réinitialiser
     $ClearButton.Add_Click({
         $TextBox.Text = ""
         $DataGridView.Rows.Clear()
-        $Form.Text = "Recherche de References - Projet Iveco"
+        $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence - V$Version"
     })
 
     # Événement Enter dans la textbox
