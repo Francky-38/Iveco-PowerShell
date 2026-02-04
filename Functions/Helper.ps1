@@ -428,17 +428,17 @@ function Show-SearchGui {
     # Ajouter les colonnes
     $DataGridView.ColumnCount = 7
     $DataGridView.Columns[0].Name = "March" + [char]233
-    $DataGridView.Columns[0].Width = 400
+    $DataGridView.Columns[0].Width = 350
     $DataGridView.Columns[1].Name = "Poste"
-    $DataGridView.Columns[1].Width = 250
+    $DataGridView.Columns[1].Width = 275
     $DataGridView.Columns[2].Name = "SOP"
-    $DataGridView.Columns[2].Width = 180
+    $DataGridView.Columns[2].Width = 250
     $DataGridView.Columns[3].Name = "Page"
     $DataGridView.Columns[3].Width = 50
-    $DataGridView.Columns[4].Name = "Date"
-    $DataGridView.Columns[4].Width = 130
-    $DataGridView.Columns[5].Name = "Auteur"
-    $DataGridView.Columns[5].Width = 120
+    $DataGridView.Columns[5].Name = "Date"
+    $DataGridView.Columns[5].Width = 130
+    $DataGridView.Columns[4].Name = "Auteur"
+    $DataGridView.Columns[4].Width = 80
     $DataGridView.Columns[6].Name = "PathPptx"
     $DataGridView.Columns[6].Visible = $false  # Masquer cette colonne
 
@@ -460,24 +460,38 @@ function Show-SearchGui {
         $FoundCount = 0
 
         foreach ($Entry in $AllEntries) {
-            $Reference = $Entry.SelectSingleNode("Reference").InnerText
+            $Affaire = $Entry.SelectSingleNode("Affaire").InnerText
+            $Poste = $Entry.SelectSingleNode("Poste").InnerText
+            $Archive = $Entry.SelectSingleNode("SOP").InnerText
+            $DateMod = $Entry.SelectSingleNode("DateModification").InnerText
+            $Path = $Entry.SelectSingleNode("Path").InnerText
+            $Auteur = $Entry.SelectSingleNode("Auteur").InnerText
             
-            if ($Reference -like "*$SearchTerm*") {
-                $Affaire = $Entry.SelectSingleNode("Affaire").InnerText
-                $Poste = $Entry.SelectSingleNode("Poste").InnerText
-                $Archive = $Entry.SelectSingleNode("SOP").InnerText
-                $Fichier = $Entry.SelectSingleNode("Page").InnerText
-                $DateMod = $Entry.SelectSingleNode("DateModification").InnerText
-                $Path = $Entry.SelectSingleNode("Path").InnerText
-                
-                # Extraire le numéro de page de "slide1.xml" → 1
-                $PageNumber = ""
-                if ($Fichier -match 'slide(\d+)') {
-                    $PageNumber = $Matches[1]
-                }
+            # Parcourir les Pages et leurs References
+            $PagesNode = $Entry.SelectSingleNode("Pages")
+            if ($PagesNode) {
+                $Pages = $PagesNode.SelectNodes("Page")
+                foreach ($Page in $Pages) {
+                    $PageName = $Page.SelectSingleNode("Name").InnerText
+                    $ReferencesNode = $Page.SelectSingleNode("References")
+                    if ($ReferencesNode) {
+                        $References = $ReferencesNode.SelectNodes("Reference")
+                        foreach ($RefNode in $References) {
+                            $Reference = $RefNode.InnerText
+                            
+                            if ($Reference -like "*$SearchTerm*") {
+                                # Extraire le numéro de page de "slide1.xml" → 1
+                                $PageNumber = ""
+                                if ($PageName -match 'slide(\d+)') {
+                                    $PageNumber = $Matches[1]
+                                }
 
-                $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber, $DateMod, $Path)
-                $FoundCount++
+                                $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber, $Auteur, $DateMod, $Path)
+                                $FoundCount++
+                            }
+                        }
+                    }
+                }
             }
         }
 
