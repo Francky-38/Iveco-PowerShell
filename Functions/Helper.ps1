@@ -382,6 +382,12 @@ function Show-SearchGui {
         [string]$XmlPath
     )
 
+    # Charger la configuration
+    $ConfigPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath "Configs\config.ps1"
+    if (Test-Path -Path $ConfigPath) {
+        . $ConfigPath
+    }
+
     # Charger les assemblies
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
@@ -432,10 +438,10 @@ function Show-SearchGui {
     $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence - V$Version"
     $Form.Size = New-Object System.Drawing.Size(1220, 550)
     $Form.StartPosition = "CenterScreen"
-    $Form.BackColor = [System.Drawing.Color]::WhiteSmoke
+    $Form.BackColor = [System.Drawing.Color]::($Config.FormBackColor)
     
     # Ajouter l'icône à la Form
-    $IconPath = "D:\W\Iveco\PowerShell\nono bleu.ico"
+    $IconPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath "nono bleu.ico"
     if (Test-Path -Path $IconPath) {
         $Form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($IconPath)
     }
@@ -482,10 +488,20 @@ function Show-SearchGui {
     $ClearButton.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
     $ClearButton.FlatStyle = "Flat"
 
+    # Label info base de donn[233]es
+    $BaseInfoLabel = New-Object System.Windows.Forms.Label
+    $BaseInfoLabel.Text = "Base : $($Config.BaseName)"
+    $BaseInfoLabel.Location = New-Object System.Drawing.Point(690, 10)
+    $BaseInfoLabel.Size = New-Object System.Drawing.Size(250, 30)
+    $BaseInfoLabel.Font = New-Object System.Drawing.Font("Arial", 12, [System.Drawing.FontStyle]::Italic)
+    $BaseInfoLabel.TextAlign = "MiddleRight"
+    $BaseInfoLabel.ForeColor = [System.Drawing.Color]::DarkGray
+
     $SearchPanel.Controls.Add($Label)
     $SearchPanel.Controls.Add($TextBox)
     $SearchPanel.Controls.Add($SearchButton)
     $SearchPanel.Controls.Add($ClearButton)
+    $SearchPanel.Controls.Add($BaseInfoLabel)
 
     # DataGridView pour les résultats
     $DataGridView = New-Object System.Windows.Forms.DataGridView

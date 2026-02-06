@@ -17,5 +17,9 @@ $Config.ExtractionRootPath = "D:\W\Iveco\serveur"
 $Config.ExtractXmlData = "D:\W\Iveco\RefServeur.xml"
 $Config.SubPathStructure = "01-Dossiers ligne EL-EG\LIGNE EG0"
 
+# Paramètres de l'interface graphique
+$Config.BaseName = "Locale" #"Globale" #"locale"
+$Config.FormBackColor = "Honeydew" #"PaleGreen" #"WhiteSmoke"
+
 # Export des paramètres
 $Config
