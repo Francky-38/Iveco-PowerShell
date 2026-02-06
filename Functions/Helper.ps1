@@ -25,17 +25,23 @@
 
 function Get-ProjectVersion {
     try {
+        # Aller au répertoire racine du projet
+        Push-Location (Split-Path -Path $PSScriptRoot -Parent)
+        
         # Récupérer le dernier tag Git
-        $latestTag = git describe --tags --abbrev=0 2>$null
-        if ($latestTag) {
+        $latestTag = git describe --tags --abbrev=0 2>&1
+        
+        Pop-Location
+        
+        if ($latestTag -and $LASTEXITCODE -eq 0) {
             # Nettoyer le 'v' du début si présent
             return $latestTag -replace '^v', ''
         }
     }
     catch {
-        # En cas d'erreur, retourner une version par défaut
+        Write-Host "Erreur Get-ProjectVersion: $_" -ForegroundColor Red
     }
-    return "4"
+    return "5.2.0"
 }
 
 function Get-WelcomeMessage {
