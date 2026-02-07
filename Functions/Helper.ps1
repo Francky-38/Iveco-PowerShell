@@ -465,21 +465,21 @@ function Show-SearchGui {
 
     # Label
     $Label = New-Object System.Windows.Forms.Label
-    $Label.Text = "R" + [char]233 + "f" + [char]233 + "rence cherch" + [char]233 + "e:"
-    $Label.Location = New-Object System.Drawing.Point(10, 10)
-    $Label.Size = New-Object System.Drawing.Size(150, 20)
+    $Label.Text = "R" + [char]233 + "f" + [char]233 + "rence(s) (s" + [char]233 + "par" + [char]233 + "es par ;):"
+    $Label.Location = New-Object System.Drawing.Point(10, 15)
+    $Label.Size = New-Object System.Drawing.Size(200, 20)
     $Label.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
 
     # TextBox
     $TextBox = New-Object System.Windows.Forms.TextBox
-    $TextBox.Location = New-Object System.Drawing.Point(160, 10)
-    $TextBox.Size = New-Object System.Drawing.Size(200, 25)
+    $TextBox.Location = New-Object System.Drawing.Point(210, 15)
+    $TextBox.Size = New-Object System.Drawing.Size(600, 25)
     $TextBox.Font = New-Object System.Drawing.Font("Arial", 10)
 
     # Bouton Rechercher
     $SearchButton = New-Object System.Windows.Forms.Button
     $SearchButton.Text = "Rechercher"
-    $SearchButton.Location = New-Object System.Drawing.Point(370, 10)
+    $SearchButton.Location = New-Object System.Drawing.Point(820, 10)
     $SearchButton.Size = New-Object System.Drawing.Size(100, 30)
     $SearchButton.BackColor = [System.Drawing.Color]::LightBlue
     $SearchButton.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
@@ -488,7 +488,7 @@ function Show-SearchGui {
     # Bouton Réinitialiser
     $ClearButton = New-Object System.Windows.Forms.Button
     $ClearButton.Text = "R" + [char]233 + "initialiser"
-    $ClearButton.Location = New-Object System.Drawing.Point(480, 10)
+    $ClearButton.Location = New-Object System.Drawing.Point(930, 10)
     $ClearButton.Size = New-Object System.Drawing.Size(100, 30)
     $ClearButton.BackColor = [System.Drawing.Color]::LightGray
     $ClearButton.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
@@ -497,8 +497,8 @@ function Show-SearchGui {
     # Label info base de donn[233]es
     $BaseInfoLabel = New-Object System.Windows.Forms.Label
     $BaseInfoLabel.Text = "Base : $($Config.BaseName)"
-    $BaseInfoLabel.Location = New-Object System.Drawing.Point(690, 10)
-    $BaseInfoLabel.Size = New-Object System.Drawing.Size(250, 30)
+    $BaseInfoLabel.Location = New-Object System.Drawing.Point(1030, 10)
+    $BaseInfoLabel.Size = New-Object System.Drawing.Size(140, 30)
     $BaseInfoLabel.Font = New-Object System.Drawing.Font("Arial", 12, [System.Drawing.FontStyle]::Italic)
     $BaseInfoLabel.TextAlign = "MiddleRight"
     $BaseInfoLabel.ForeColor = [System.Drawing.Color]::DarkGray
@@ -522,21 +522,23 @@ function Show-SearchGui {
     $DataGridView.Font = New-Object System.Drawing.Font("Arial", 9)
 
     # Ajouter les colonnes
-    $DataGridView.ColumnCount = 7
+    $DataGridView.ColumnCount = 8
     $DataGridView.Columns[0].Name = "March" + [char]233
-    $DataGridView.Columns[0].Width = 350
+    $DataGridView.Columns[0].Width = 300
     $DataGridView.Columns[1].Name = "Poste"
-    $DataGridView.Columns[1].Width = 275
+    $DataGridView.Columns[1].Width = 255
     $DataGridView.Columns[2].Name = "SOP"
-    $DataGridView.Columns[2].Width = 250
+    $DataGridView.Columns[2].Width = 240
     $DataGridView.Columns[3].Name = "Page"
     $DataGridView.Columns[3].Width = 50
     $DataGridView.Columns[5].Name = "Date"
     $DataGridView.Columns[5].Width = 130
     $DataGridView.Columns[4].Name = "Auteur"
     $DataGridView.Columns[4].Width = 80
-    $DataGridView.Columns[6].Name = "PathPptx"
-    $DataGridView.Columns[6].Visible = $false  # Masquer cette colonne
+    $DataGridView.Columns[6].Name = "Nb Ref"
+    $DataGridView.Columns[6].Width = 80
+    $DataGridView.Columns[7].Name = "PathPptx"
+    $DataGridView.Columns[7].Visible = $false  # Masquer cette colonne
 
     # En-tête
     $DataGridView.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::DarkBlue
@@ -545,10 +547,18 @@ function Show-SearchGui {
 
     # Événement du bouton Rechercher
     $SearchButton.Add_Click({
-        $SearchTerm = $TextBox.Text.Trim()
+        $SearchInput = $TextBox.Text.Trim()
         
-        if ([string]::IsNullOrEmpty($SearchTerm)) {
-            [System.Windows.Forms.MessageBox]::Show("Veuillez entrer une reference a rechercher", "Attention", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ([string]::IsNullOrEmpty($SearchInput)) {
+            [System.Windows.Forms.MessageBox]::Show("Veuillez entrer une ou plusieurs references a rechercher (separees par ;)", "Attention", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            return
+        }
+
+        # Diviser les références par ';' et nettoyer chaque terme
+        $SearchTerms = @($SearchInput -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        
+        if ($SearchTerms.Count -eq 0) {
+            [System.Windows.Forms.MessageBox]::Show("Veuillez entrer une ou plusieurs references valides", "Attention", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
             return
         }
 
@@ -572,19 +582,33 @@ function Show-SearchGui {
                     $ReferencesNode = $Page.SelectSingleNode("References")
                     if ($ReferencesNode) {
                         $References = $ReferencesNode.SelectNodes("Reference")
-                        foreach ($RefNode in $References) {
-                            $Reference = $RefNode.InnerText
-                            
-                            if ($Reference -like "*$SearchTerm*") {
-                                # Extraire le numéro de page de "slide1.xml" → 1
-                                $PageNumber = ""
-                                if ($PageName -match 'slide(\d+)') {
-                                    $PageNumber = $Matches[1]
-                                }
-
-                                $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber, $Auteur, $DateMod, $Path)
-                                $FoundCount++
+                        $ReferencesText = @($References | ForEach-Object { $_.InnerText })
+                        $CombinedRefsText = $ReferencesText -join " "
+                        
+                        # Vérifier que TOUS les termes de recherche sont présents dans cette page
+                        $AllTermsFound = $true
+                        foreach ($Term in $SearchTerms) {
+                            if ($CombinedRefsText -notlike "*$Term*") {
+                                $AllTermsFound = $false
+                                break
                             }
+                        }
+                        
+                        if ($AllTermsFound) {
+                            # Extraire le numéro de page de "slide1.xml" → 1
+                            $PageNumber = ""
+                            if ($PageName -match 'slide(\d+)') {
+                                $PageNumber = $Matches[1]
+                            }
+
+                            # Compter le nombre de références dans la page et formater "X% (Y/Z)"
+                            $NbRefInPage = $References.Count
+                            $NbRefSearched = $SearchTerms.Count
+                            $Percentage = [math]::Round(($NbRefSearched / $NbRefInPage) * 100)
+                            $RefCount = "$Percentage% ($NbRefSearched/$NbRefInPage)"
+
+                            $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber, $Auteur, $DateMod, $RefCount, $Path)
+                            $FoundCount++
                         }
                     }
                 }
@@ -615,7 +639,7 @@ function Show-SearchGui {
     $DataGridView.Add_CellDoubleClick({
         if ($_.ColumnIndex -le 2) {  # Colonne 2 = SOP
             $RowIndex = $_.RowIndex
-            $FilePath = $DataGridView.Rows[$RowIndex].Cells[6].Value
+            $FilePath = $DataGridView.Rows[$RowIndex].Cells[7].Value
             
             if (Test-Path $FilePath) {
                 try {
@@ -630,7 +654,7 @@ function Show-SearchGui {
         }
         if ($_.ColumnIndex -eq 3) {  # Colonne 3 = Page
             $RowIndex = $_.RowIndex
-            $FilePath = $DataGridView.Rows[$RowIndex].Cells[6].Value
+            $FilePath = $DataGridView.Rows[$RowIndex].Cells[7].Value
             $index=$DataGridView.Rows[$RowIndex].Cells[3].Value
             
             if (Test-Path $FilePath) {
@@ -664,7 +688,7 @@ function Show-SearchGui {
         if ($HitTest.ColumnIndex -eq 2 -and $HitTest.RowIndex -ge 0) {
             $RowIndex = $HitTest.RowIndex
             $PageNum = $DataGridView.Rows[$HitTest.RowIndex].Cells[3].Value
-            $FilePath = $DataGridView.Rows[$HitTest.RowIndex].Cells[6].Value
+            $FilePath = $DataGridView.Rows[$HitTest.RowIndex].Cells[7].Value
             $Form.Text = "Chemin: " + $FilePath + " | Page: " + $PageNum
         } else {
             $SearchCount = $DataGridView.Rows.Count
