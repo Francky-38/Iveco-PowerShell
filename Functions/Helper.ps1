@@ -213,7 +213,7 @@ function Export-PptxReferencesFromTree {
                                                 
                                                 # Chercher toutes les références dans le texte
                                                 # Format: [TRS]?\d{5,10} (peut être au milieu d'une chaîne)
-                                                $References = [regex]::Matches($Text, '[TRS]?\d{5,10}')
+                                                $References = [regex]::Matches($Text, '[THRS]?\d{5,10}')
                                                 
                                                 foreach ($RefMatch in $References) {
                                                     $Reference = $RefMatch.Value
