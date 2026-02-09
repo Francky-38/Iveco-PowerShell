@@ -904,3 +904,150 @@ Set objPPT = Nothing
         Remove-Item -Path $VBScriptPath -Force -ErrorAction SilentlyContinue
     }
 }
+
+function New-CompiledPresentation {
+    <#
+    .SYNOPSIS
+    Cree une presentation PowerPoint compilee en copiant des slides depuis plusieurs sources vers un modele.
+
+    .DESCRIPTION
+    Cette fonction copie le modele vierge vers le chemin de sortie, puis y ajoute des slides
+    selectionnees a partir de fichiers PPTX source selon une table descriptive.
+
+    .PARAMETER ModelePath
+    Chemin du modele PPTX vierge (contient uniquement les masques)
+
+    .PARAMETER OutputFileName
+    Nom du fichier de sortie PPTX
+
+    .PARAMETER OutputPath
+    Chemin du dossier de sortie
+
+    .PARAMETER Pages
+    Tableau contenant les pages a copier. Chaque element doit avoir :
+    - Source : Chemin du fichier PPTX source
+    - PageSource : Numero de la page a copier (1-indexed)
+
+    .EXAMPLE
+    $Pages = @(
+        @{ Source = "C:\Source1.pptx"; PageSource = 2 },
+        @{ Source = "C:\Source2.pptx"; PageSource = 3 }
+    )
+    New-CompiledPresentation -ModelePath "C:\Model.pptx" `
+                             -OutputFileName "Compiled.pptx" `
+                             -OutputPath "C:\Output" `
+                             -Pages $Pages
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ModelePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputFileName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory = $true)]
+        [array]$Pages
+    )
+
+    # Validation des parametres
+    if (-not (Test-Path $ModelePath)) {
+        Write-Error "Le modele n'existe pas."
+        return
+    }
+
+    if (-not (Test-Path $OutputPath)) {
+        Write-Error "Le dossier de sortie n'existe pas."
+        return
+    }
+
+    # Chemin complet du fichier de sortie
+    $OutputFilePath = Join-Path $OutputPath $OutputFileName
+
+    try {
+        # Copier le modele vers le chemin de sortie
+        Copy-Item -Path $ModelePath -Destination $OutputFilePath -Force
+        Write-Host "Modele copie vers : $OutputFilePath" -ForegroundColor Green
+
+        # Charger PowerPoint COM
+        $PPTApp = New-Object -ComObject PowerPoint.Application
+        $PPTApp.Visible = 1  # PowerPoint ne permet pas de masquer la fenetre
+
+        # Ouvrir la presentation de compilation
+        $FullOutputPath = [System.IO.Path]::GetFullPath($OutputFilePath)
+        $CompilationPres = $PPTApp.Presentations.Open($FullOutputPath)
+
+        # Supprimer la premiere page vierge du modele
+        if ($CompilationPres.Slides.Count -gt 0) {
+            $CompilationPres.Slides(1).Delete()
+        }
+
+        Write-Host "Compilation en cours..." -ForegroundColor Cyan
+
+        foreach ($Page in $Pages) {
+            $SourceFile = $Page.Source
+            $SourcePageNum = $Page.PageSource
+
+            # Verifier l'existence du fichier source
+            if (-not (Test-Path $SourceFile)) {
+                Write-Warning "Fichier source non trouve. Ignore."
+                continue
+            }
+
+            try {
+                # Ouvrir le fichier source
+                $FullSourcePath = [System.IO.Path]::GetFullPath($SourceFile)
+                $SourcePres = $PPTApp.Presentations.Open($FullSourcePath)
+
+                # Verifier que le numero de page existe
+                if ($SourcePageNum -gt $SourcePres.Slides.Count -or $SourcePageNum -lt 1) {
+                    Write-Warning "La page n'existe pas. Ignore."
+                    $SourcePres.Close()
+                    continue
+                }
+
+                # Copier la slide
+                $SourceSlide = $SourcePres.Slides($SourcePageNum)
+                
+                # Copier vers le presse-papiers et coller dans la compilation
+                $SourceSlide.Copy()
+                $CompilationPres.Slides.Paste() | Out-Null
+                
+                $FileName = [System.IO.Path]::GetFileName($SourceFile)
+                Write-Host "Page $SourcePageNum de $FileName copiee" -ForegroundColor Green
+
+                # Fermer le fichier source
+                $SourcePres.Close()
+            }
+            catch {
+                $ErrorMsg = $_
+                Write-Error "Erreur lors du traitement : $ErrorMsg"
+            }
+        }
+
+        # Sauvegarder la presentation de compilation
+        $CompilationPres.Save()
+        Write-Host "Presentation compilee sauvegardee" -ForegroundColor Green
+
+        # Fermer et nettoyer
+        $CompilationPres.Close()
+        $PPTApp.Quit()
+    }
+    catch {
+        $ErrorMsg = $_
+        Write-Error "Erreur lors de la compilation : $ErrorMsg"
+    }
+    finally {
+        # Liberer les ressources COM
+        if ($null -ne $CompilationPres) {
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($CompilationPres) | Out-Null
+        }
+        if ($null -ne $PPTApp) {
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($PPTApp) | Out-Null
+        }
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
+    }
+}
