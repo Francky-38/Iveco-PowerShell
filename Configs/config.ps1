@@ -2,7 +2,7 @@
 
 # Variables globales
 $Global:ProjectName = "Iveco-PowerShell"
-$Global:ProjectVersion = "1.0.0"
+$Global:ProjectVersion = "7.0.1"
 $Global:ProjectAuthor = "Iveco Team"
 
 # Paramètres

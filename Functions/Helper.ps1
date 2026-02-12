@@ -41,12 +41,12 @@ function Get-ProjectVersion {
     catch {
         Write-Host "Erreur Get-ProjectVersion: $_" -ForegroundColor Red
     }
-    return "5.2.0"
+    return $Global:ProjectVersion
 }
 
 function Get-WelcomeMessage {
     param(
-        [string]$Message = "Bienvenue dans le projet Iveco!"
+        [string]$Message = "Bienvenue !"
     )
 
     Write-Host $Message -ForegroundColor Cyan
@@ -562,6 +562,7 @@ function Show-SearchGui {
             return
         }
 
+        $Form.Text = "Recherche En cours..."
         $DataGridView.Rows.Clear()
         $FoundCount = 0
 
