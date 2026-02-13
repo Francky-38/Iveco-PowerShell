@@ -98,6 +98,9 @@ function Export-PptxReferencesFromTree {
         [string]$SubPathStructure = "01-Dossiers ligne EL-EG\LIGNE EG0"
     )
 
+    # Enregistrer l'heure de départ
+    $StartTime = Get-Date
+
     # Vérifier que le chemin existe
     if (-not (Test-Path -Path $RootPath)) {
         Write-Host "Erreur: Le chemin '$RootPath' n'existe pas" -ForegroundColor Red
@@ -356,10 +359,16 @@ function Export-PptxReferencesFromTree {
         }
         
         Write-Host ""
+        
+        # Calculer le temps écoulé
+        $EndTime = Get-Date
+        $Duration = $EndTime - $StartTime
+        
         Write-Host "OK - Traitement termine!" -ForegroundColor Green
         Write-Host "  - Fichiers PPTX traites: $TotalFiles" -ForegroundColor Cyan
         Write-Host "  - Nombre total de references extraites: $TotalReferences" -ForegroundColor Cyan
         Write-Host "  - Fichier de sortie: $ZipPath" -ForegroundColor Cyan
+        Write-Host "  - Duree de traitement: $($Duration.Hours)h $($Duration.Minutes)m $($Duration.Seconds)s" -ForegroundColor Cyan
     }
     catch {
         Write-Host "Erreur lors du traitement: $_" -ForegroundColor Red
@@ -463,23 +472,36 @@ function Show-SearchGui {
     $ToolTip = New-Object System.Windows.Forms.ToolTip
     $ToolTip.SetToolTip($SearchPanel, "D" + [char]233 + "velopp" + [char]233 + " par : Franck Ginhoux")
 
-    # Label
+    # Label pour Références
     $Label = New-Object System.Windows.Forms.Label
-    $Label.Text = "R" + [char]233 + "f" + [char]233 + "rence(s) (s" + [char]233 + "par" + [char]233 + "es par ;):"
+    $Label.Text = "R" + [char]233 + "f" + [char]233 + "rence(s):"
     $Label.Location = New-Object System.Drawing.Point(10, 15)
-    $Label.Size = New-Object System.Drawing.Size(200, 20)
+    $Label.Size = New-Object System.Drawing.Size(100, 20)
     $Label.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
 
-    # TextBox
+    # TextBox pour Références
     $TextBox = New-Object System.Windows.Forms.TextBox
-    $TextBox.Location = New-Object System.Drawing.Point(210, 15)
-    $TextBox.Size = New-Object System.Drawing.Size(600, 25)
+    $TextBox.Location = New-Object System.Drawing.Point(110, 15)
+    $TextBox.Size = New-Object System.Drawing.Size(440, 25)
     $TextBox.Font = New-Object System.Drawing.Font("Arial", 10)
+
+    # Label pour Crit. Marché
+    $LabelMarket = New-Object System.Windows.Forms.Label
+    $LabelMarket.Text = "Crit. March" + [char]233 + ":"
+    $LabelMarket.Location = New-Object System.Drawing.Point(570, 15)
+    $LabelMarket.Size = New-Object System.Drawing.Size(100, 20)
+    $LabelMarket.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+
+    # TextBox pour Crit. Marché
+    $TextBoxMarket = New-Object System.Windows.Forms.TextBox
+    $TextBoxMarket.Location = New-Object System.Drawing.Point(670, 15)
+    $TextBoxMarket.Size = New-Object System.Drawing.Size(130, 25)
+    $TextBoxMarket.Font = New-Object System.Drawing.Font("Arial", 10)
 
     # Bouton Rechercher
     $SearchButton = New-Object System.Windows.Forms.Button
     $SearchButton.Text = "Rechercher"
-    $SearchButton.Location = New-Object System.Drawing.Point(820, 10)
+    $SearchButton.Location = New-Object System.Drawing.Point(810, 10)
     $SearchButton.Size = New-Object System.Drawing.Size(100, 30)
     $SearchButton.BackColor = [System.Drawing.Color]::LightBlue
     $SearchButton.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
@@ -488,13 +510,13 @@ function Show-SearchGui {
     # Bouton Réinitialiser
     $ClearButton = New-Object System.Windows.Forms.Button
     $ClearButton.Text = "R" + [char]233 + "initialiser"
-    $ClearButton.Location = New-Object System.Drawing.Point(930, 10)
+    $ClearButton.Location = New-Object System.Drawing.Point(920, 10)
     $ClearButton.Size = New-Object System.Drawing.Size(100, 30)
     $ClearButton.BackColor = [System.Drawing.Color]::LightGray
     $ClearButton.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
     $ClearButton.FlatStyle = "Flat"
 
-    # Label info base de donn[233]es
+    # Label info base de données
     $BaseInfoLabel = New-Object System.Windows.Forms.Label
     $BaseInfoLabel.Text = "Base : $($Config.BaseName)"
     $BaseInfoLabel.Location = New-Object System.Drawing.Point(1030, 10)
@@ -505,6 +527,8 @@ function Show-SearchGui {
 
     $SearchPanel.Controls.Add($Label)
     $SearchPanel.Controls.Add($TextBox)
+    $SearchPanel.Controls.Add($LabelMarket)
+    $SearchPanel.Controls.Add($TextBoxMarket)
     $SearchPanel.Controls.Add($SearchButton)
     $SearchPanel.Controls.Add($ClearButton)
     $SearchPanel.Controls.Add($BaseInfoLabel)
@@ -562,6 +586,22 @@ function Show-SearchGui {
             return
         }
 
+        # Récupérer le critère marché
+        $MarketCriteria = $TextBoxMarket.Text.Trim()
+        $IsNegativeMarketFilter = $false
+        $MarketFilterValue = ""
+        
+        if (-not [string]::IsNullOrEmpty($MarketCriteria)) {
+            # Vérifier si c'est un filtre négatif (commence par _)
+            if ($MarketCriteria.StartsWith("_")) {
+                $IsNegativeMarketFilter = $true
+                $MarketFilterValue = $MarketCriteria.Substring(1)
+            } else {
+                $IsNegativeMarketFilter = $false
+                $MarketFilterValue = $MarketCriteria
+            }
+        }
+
         $Form.Text = "Recherche En cours..."
         $DataGridView.Rows.Clear()
         $FoundCount = 0
@@ -573,6 +613,22 @@ function Show-SearchGui {
             $DateMod = $Entry.SelectSingleNode("DateModification").InnerText
             $Path = $Entry.SelectSingleNode("Path").InnerText
             $Auteur = $Entry.SelectSingleNode("Auteur").InnerText
+            
+            # Appliquer le filtre marché sur le champ Affaire
+            $AffaireMatchesMarketFilter = $true
+            if (-not [string]::IsNullOrEmpty($MarketFilterValue)) {
+                if ($IsNegativeMarketFilter) {
+                    # Filtre négatif : Affaire ne doit PAS contenir le texte
+                    $AffaireMatchesMarketFilter = -not ($Affaire -like "*$MarketFilterValue*")
+                } else {
+                    # Filtre positif : Affaire doit contenir le texte
+                    $AffaireMatchesMarketFilter = $Affaire -like "*$MarketFilterValue*"
+                }
+            }
+            
+            if (-not $AffaireMatchesMarketFilter) {
+                continue  # Ignorer cette entrée si elle ne correspond pas au filtre marché
+            }
             
             # Parcourir les Pages et leurs References
             $PagesNode = $Entry.SelectSingleNode("Pages")
@@ -625,6 +681,7 @@ function Show-SearchGui {
     # Événement du bouton Réinitialiser
     $ClearButton.Add_Click({
         $TextBox.Text = ""
+        $TextBoxMarket.Text = ""
         $DataGridView.Rows.Clear()
         $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence - V$Version"
     })
