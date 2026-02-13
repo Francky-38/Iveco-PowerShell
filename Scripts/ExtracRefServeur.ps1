@@ -20,7 +20,7 @@
 param(
     [string]$RootPath = "",
     [string]$OutputFile = "",
-    [string]$SubPathStructure = ""
+    [array]$SubPathStructures = @()
 )
 
 # Charger la configuration
@@ -34,8 +34,8 @@ if ([string]::IsNullOrEmpty($RootPath)) {
 if ([string]::IsNullOrEmpty($OutputFile)) {
     $OutputFile = $Config.ExtractXmlData
 }
-if ([string]::IsNullOrEmpty($SubPathStructure)) {
-    $SubPathStructure = $Config.SubPathStructure
+if ($SubPathStructures.Count -eq 0) {
+    $SubPathStructures = $Config.SubPathStructures
 }
 
 # Charger les fonctions
@@ -51,7 +51,7 @@ Get-WelcomeMessage -Message "Extraction de references depuis l'arborescence des 
 Get-SystemInfo
 
 # Lancer l'extraction sur l'arborescence (génère automatiquement du CLIXML)
-Export-PptxReferencesFromTree -RootPath $RootPath -OutputFile $OutputFile -SubPathStructure $SubPathStructure
+Export-PptxReferencesFromTree -RootPath $RootPath -OutputFile $OutputFile -SubPathStructures $SubPathStructures
 
 Write-Host ""
 Write-Host "OK - Script termine avec succes!" -ForegroundColor Green

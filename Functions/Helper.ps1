@@ -95,7 +95,7 @@ function Export-PptxReferencesFromTree {
     param(
         [string]$RootPath = "D:\W\Iveco\serveur",
         [string]$OutputFile = "",
-        [string]$SubPathStructure = "01-Dossiers ligne EL-EG\LIGNE EG0"
+        [array]$SubPathStructures = @("01-Dossiers ligne EL-EG\LIGNE EG0")
     )
 
     # Enregistrer l'heure de départ
@@ -105,6 +105,11 @@ function Export-PptxReferencesFromTree {
     if (-not (Test-Path -Path $RootPath)) {
         Write-Host "Erreur: Le chemin '$RootPath' n'existe pas" -ForegroundColor Red
         return
+    }
+
+    # Normaliser SubPathStructures (peut être null ou vide)
+    if ($null -eq $SubPathStructures -or $SubPathStructures.Count -eq 0) {
+        $SubPathStructures = @("")
     }
 
     # Déterminer le fichier de sortie (format CLIXML uniquement)
@@ -117,6 +122,7 @@ function Export-PptxReferencesFromTree {
 
     Write-Host "`nRecherche des fichiers PPTX dans l'arborescence..." -ForegroundColor Yellow
     Write-Host "Chemin racine: $RootPath" -ForegroundColor Cyan
+    Write-Host "Sous-chemins a scruter: $($SubPathStructures -join ', ')" -ForegroundColor Cyan
     Write-Host "Sortie: $OutputFile" -ForegroundColor Cyan
 
     # Créer le fichier XML de sortie principal
@@ -142,31 +148,33 @@ function Export-PptxReferencesFromTree {
         Write-Host "  - $($AffairesFolders.Count) dossier(s) Affaire trouve(s)" -ForegroundColor Cyan
         Write-Host ""
         
-        # Étape 2: Pour chaque Affaire, chercher dans le chemin spécifique
+        # Étape 2: Pour chaque Affaire, chercher dans chaque sous-chemin
         foreach ($AffaireFolder in $AffairesFolders) {
             Write-Host "Exploration Affaire: $($AffaireFolder.Name)" -ForegroundColor Cyan
             
-            # Construire le chemin vers les dossiers postes
-            if ([string]::IsNullOrEmpty($SubPathStructure)) {
-                # Si SubPathStructure est vide, chercher directement dans le dossier d'affaires
-                $PostesPath = $AffaireFolder.FullName
-            } else {
-                # Sinon, utiliser le chemin spécifié
-                $PostesPath = Join-Path -Path $AffaireFolder.FullName -ChildPath $SubPathStructure
-            }
-            
-            if (Test-Path -Path $PostesPath) {
-                # Étape 3: Chercher les dossiers de postes (1er niveau, pas récursif)
-                $PostesFolders = Get-ChildItem -Path $PostesPath -Directory -ErrorAction SilentlyContinue
+            # Itérer sur chaque sous-chemin à scruter
+            foreach ($SubPath in $SubPathStructures) {
+                # Construire le chemin vers les dossiers postes
+                if ([string]::IsNullOrEmpty($SubPath)) {
+                    # Si SubPath est vide, chercher directement dans le dossier d'affaires
+                    $PostesPath = $AffaireFolder.FullName
+                } else {
+                    # Sinon, utiliser le chemin spécifié
+                    $PostesPath = Join-Path -Path $AffaireFolder.FullName -ChildPath $SubPath
+                }
                 
-                foreach ($PosteFolder in $PostesFolders) {
-                    Write-Host "  Poste: $($PosteFolder.Name)" -ForegroundColor Gray
+                if (Test-Path -Path $PostesPath) {
+                    # Étape 3: Chercher les dossiers de postes (1er niveau, pas récursif)
+                    $PostesFolders = Get-ChildItem -Path $PostesPath -Directory -ErrorAction SilentlyContinue
                     
-                    # Étape 4: Chercher les fichiers .pptx dans ce dossier (pas récursif)
-                    $FilesInPoste = Get-ChildItem -Path $PosteFolder.FullName -Filter "*.pptx" -ErrorAction SilentlyContinue
-                    
-                    if ($FilesInPoste.Count -gt 0) {
-                        Write-Host "    - $($FilesInPoste.Count) fichier(s) PPTX" -ForegroundColor Gray
+                    foreach ($PosteFolder in $PostesFolders) {
+                        Write-Host "  Poste: $($PosteFolder.Name) [Structure: $SubPath]" -ForegroundColor Gray
+                        
+                        # Étape 4: Chercher les fichiers .pptx dans ce dossier (pas récursif)
+                        $FilesInPoste = Get-ChildItem -Path $PosteFolder.FullName -Filter "*.pptx" -ErrorAction SilentlyContinue
+                        
+                        if ($FilesInPoste.Count -gt 0) {
+                            Write-Host "      - $($FilesInPoste.Count) fichier(s) PPTX" -ForegroundColor Gray
                         
                         # Traiter chaque fichier PPTX directement
                         foreach ($PptxFile in $FilesInPoste) {
@@ -309,8 +317,9 @@ function Export-PptxReferencesFromTree {
                     }
                 }
             } else {
-                $PathDisplay = if ([string]::IsNullOrEmpty($SubPathStructure)) { "le dossier d'affaires" } else { "'$SubPathStructure'" }
-                Write-Host "  Attention: Chemin $PathDisplay non trouve" -ForegroundColor Yellow
+                    $PathDisplay = if ([string]::IsNullOrEmpty($SubPath)) { "le dossier d'affaires" } else { "'$SubPath'" }
+                    Write-Host "    Attention: Chemin $PathDisplay non trouve" -ForegroundColor Yellow
+                }
             }
         }
         

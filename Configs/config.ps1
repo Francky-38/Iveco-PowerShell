@@ -2,7 +2,7 @@
 
 # Variables globales
 $Global:ProjectName = "MY-Project-PowerShell"
-$Global:ProjectVersion = "7.0.2"
+$Global:ProjectVersion = "8.0.0"
 $Global:ProjectAuthor = "Franck Ginhoux"
 
 # Paramètres
@@ -15,11 +15,18 @@ $Config = @{
 # Paramètres d'extraction et recherche des references
 $Config.ExtractionRootPath = "D:\W\Iveco\serveur"
 $Config.ExtractXmlData = "D:\W\Iveco\RefServeur"
-$Config.SubPathStructure = "01-Dossiers ligne EL-EG\LIGNE EG0"
+
+# Sous-chemins à scruter dans chaque dossier d'affaire
+# Laissez vide pour scruter directement le dossier d'affaire
+# Exemple avec plusieurs dossiers: @("01-Dossiers ligne EL-EG\LIGNE EG0", "02-Autre structure")
+$Config.SubPathStructures = @(
+    "01-Dossiers ligne EL-EG\LIGNE EG0"
+    "01-Dossiers ligne EL-EG\LIGNE EL0"
+    )
 
 # Paramètres de l'interface graphique
 $Config.BaseName = "Locale" #"Globale" #"locale"
-$Config.FormBackColor = "Honeydew" #"PaleGreen" #"WhiteSmoke"
+$Config.FormBackColor = "Honeydew" #"WhiteSmoke"  #"Honeydew"
 
 # Export des paramètres
 $Config
