@@ -580,6 +580,10 @@ function Show-SearchGui {
     $LabelMarket.Size = New-Object System.Drawing.Size(100, 20)
     $LabelMarket.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
 
+    # Ajouter une info-bulle sur le LabelMarket pour aider à la saisie
+    $ToolTip = New-Object System.Windows.Forms.ToolTip
+    $ToolTip.SetToolTip($LabelMarket, "_ pour exclure le crit" + [char]232 + "re")
+
     # TextBox pour Crit. Marché
     $TextBoxMarket = New-Object System.Windows.Forms.TextBox
     $TextBoxMarket.Location = New-Object System.Drawing.Point(670, 15)
