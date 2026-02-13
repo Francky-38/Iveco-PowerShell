@@ -107,9 +107,12 @@ function Export-PptxReferencesFromTree {
         return
     }
 
-    # Déterminer le fichier de sortie
+    # Déterminer le fichier de sortie (format CLIXML uniquement)
     if ([string]::IsNullOrEmpty($OutputFile)) {
-        $OutputFile = Join-Path -Path $RootPath -ChildPath "References_Extraites.xml"
+        $OutputFile = Join-Path -Path $RootPath -ChildPath "References_Extraites.clixml"
+    } else {
+        # Assurer l'extension .clixml
+        $OutputFile = [System.IO.Path]::ChangeExtension($OutputFile, "clixml")
     }
 
     Write-Host "`nRecherche des fichiers PPTX dans l'arborescence..." -ForegroundColor Yellow
@@ -317,46 +320,45 @@ function Export-PptxReferencesFromTree {
         }
         
         Write-Host ""
-
-        # Sauvegarder le fichier XML
-        $XmlOutput.Save($OutputFile)
         
-        # Zipper le fichier XML pour économiser de la place
-        try {
-            $ZipPath = $OutputFile -replace '\.xml$', '.zip'
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            
-            # Supprimer le ZIP existant s'il existe
-            if (Test-Path -Path $ZipPath) {
-                Remove-Item -Path $ZipPath -Force
+        # Convertir les données XML en PowerShell Objects
+        Write-Host "Conversion en format CLIXML PowerShell..." -ForegroundColor Yellow
+        $AllEntries = $XmlOutput.SelectNodes("//Entree") | ForEach-Object {
+            $Entry = $_
+            $Pages = @()
+            $PagesNode = $Entry.SelectSingleNode("Pages")
+            if ($PagesNode) {
+                $Pages = $PagesNode.SelectNodes("Page") | ForEach-Object {
+                    $PageNode = $_
+                    $References = @()
+                    $ReferencesNode = $PageNode.SelectSingleNode("References")
+                    if ($ReferencesNode) {
+                        $References = $ReferencesNode.SelectNodes("Reference") | ForEach-Object { $_.InnerText }
+                    }
+                    [PSCustomObject]@{
+                        Name = $PageNode.SelectSingleNode("Name").InnerText
+                        References = $References
+                    }
+                }
             }
             
-            # Créer l'archive ZIP et ajouter le fichier XML
-            $ZipArchive = [System.IO.Compression.ZipFile]::Open($ZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
-            
-            # Ajouter le fichier XML au ZIP
-            $FileBytes = [System.IO.File]::ReadAllBytes($OutputFile)
-            $Entry = $ZipArchive.CreateEntry([System.IO.Path]::GetFileName($OutputFile))
-            $EntryStream = $Entry.Open()
-            $EntryStream.Write($FileBytes, 0, $FileBytes.Length)
-            $EntryStream.Close()
-            $ZipArchive.Dispose()
-            
-            # Calculer l'économie d'espace
-            $XmlSize = (Get-Item $OutputFile).Length
-            $ZipSize = (Get-Item $ZipPath).Length
-            $Saved = $XmlSize - $ZipSize
-            $SavedPercent = [math]::Round(($Saved / $XmlSize) * 100, 1)
-            
-            # Supprimer le fichier XML original
-            Remove-Item $OutputFile -Force
-            
-            Write-Host "  - Fichier XML compressé: $ZipPath" -ForegroundColor Cyan
-            Write-Host "  - Économie d'espace: $SavedPercent% ($([math]::Round($Saved / 1MB, 2)) MB)" -ForegroundColor Cyan
+            [PSCustomObject]@{
+                Path = $Entry.SelectSingleNode("Path").InnerText
+                Affaire = $Entry.SelectSingleNode("Affaire").InnerText
+                Poste = $Entry.SelectSingleNode("Poste").InnerText
+                SOP = $Entry.SelectSingleNode("SOP").InnerText
+                DateModification = $Entry.SelectSingleNode("DateModification").InnerText
+                Auteur = $Entry.SelectSingleNode("Auteur").InnerText
+                Pages = $Pages
+            }
         }
-        catch {
-            Write-Host "  Attention: Impossible de zipper le fichier XML: $_" -ForegroundColor Yellow
-        }
+
+        # Sauvegarder au format CLIXML PowerShell
+        $AllEntries | Export-Clixml -Path $OutputFile -Force
+        $OutputPath = $OutputFile
+        Write-Host "  - Fichier CLIXML sauvegarde: $OutputFile" -ForegroundColor Cyan
+        $FileSize = (Get-Item $OutputFile).Length / 1MB
+        Write-Host "  - Taille du fichier: $([math]::Round($FileSize, 2)) MB" -ForegroundColor Cyan
         
         Write-Host ""
         
@@ -367,7 +369,7 @@ function Export-PptxReferencesFromTree {
         Write-Host "OK - Traitement termine!" -ForegroundColor Green
         Write-Host "  - Fichiers PPTX traites: $TotalFiles" -ForegroundColor Cyan
         Write-Host "  - Nombre total de references extraites: $TotalReferences" -ForegroundColor Cyan
-        Write-Host "  - Fichier de sortie: $ZipPath" -ForegroundColor Cyan
+        Write-Host "  - Fichier de sortie: $OutputPath" -ForegroundColor Cyan
         Write-Host "  - Duree de traitement: $($Duration.Hours)h $($Duration.Minutes)m $($Duration.Seconds)s" -ForegroundColor Cyan
     }
     catch {
@@ -380,21 +382,115 @@ function Export-PptxReferencesFromTree {
 
 <#
 .SYNOPSIS
+    Charge les données d'extraction et crée des index en mémoire pour recherche rapide
+
+.DESCRIPTION
+    Charge les données depuis le fichier binaire ou ZIP et crée des index pour accès O(1)
+
+.PARAMETER DataPath
+    Chemin du fichier de données (CLIXML ou ZIP)
+
+.EXAMPLE
+    $SearchIndex = New-SearchIndex -DataPath "D:\W\Iveco\References_Extraites.clixml"
+#>
+
+function New-SearchIndex {
+    param(
+        [string]$DataPath
+    )
+    
+    $StartLoadTime = Get-Date
+    Write-Host "Chargement des donnees CLIXML..." -ForegroundColor Yellow
+    
+    # Vérifier l'existence du fichier
+    if (-not (Test-Path -Path $DataPath)) {
+        Write-Host "Erreur: Le fichier '$DataPath' n'existe pas" -ForegroundColor Red
+        return $null
+    }
+    
+    # Charger le fichier CLIXML
+    Write-Host "  Format: CLIXML PowerShell" -ForegroundColor Cyan
+    try {
+        $AllEntries = Import-Clixml -Path $DataPath
+    }
+    catch {
+        Write-Host "Erreur lors du chargement du fichier CLIXML: $_" -ForegroundColor Red
+        return $null
+    }
+    
+    # Créer les index en mémoire
+    Write-Host "Creation des index en memoire..." -ForegroundColor Yellow
+    
+    # Index 1: Par référence (rapidité pour recherche simple)
+    $ReferenceIndex = @{}
+    # Index 2: Par affaire (pour filtrage marché)
+    $AffaireIndex = @{}
+    # Index 3: Page plat (pour recherche multi-ref)
+    $PagesFlat = @()
+    
+    foreach ($Entry in $AllEntries) {
+        # Index par affaire
+        $Affaire = $Entry.Affaire
+        if (-not $AffaireIndex.ContainsKey($Affaire)) {
+            $AffaireIndex[$Affaire] = @()
+        }
+        
+        foreach ($Page in $Entry.Pages) {
+            $PageKey = @{
+                Affaire = $Entry.Affaire
+                Poste = $Entry.Poste
+                SOP = $Entry.SOP
+                Path = $Entry.Path
+                DateModification = $Entry.DateModification
+                Auteur = $Entry.Auteur
+                PageName = $Page.Name
+                References = $Page.References
+                PageNumber = if ($Page.Name -match 'slide(\d+)') { [int]$Matches[1] } else { 0 }
+            }
+            
+            $PagesFlat += $PageKey
+            $AffaireIndex[$Affaire] += $PageKey
+            
+            # Index par référence
+            foreach ($Ref in $Page.References) {
+                if (-not $ReferenceIndex.ContainsKey($Ref)) {
+                    $ReferenceIndex[$Ref] = @()
+                }
+                $ReferenceIndex[$Ref] += $PageKey
+            }
+        }
+    }
+    
+    $LoadTime = (Get-Date) - $StartLoadTime
+    Write-Host "  Donnees chargees: $($PagesFlat.Count) pages, $($ReferenceIndex.Count) references uniques" -ForegroundColor Cyan
+    Write-Host "  Temps de chargement: $($LoadTime.TotalSeconds) secondes" -ForegroundColor Cyan
+    
+    # Retourner l'objet d'index
+    return @{
+        AllEntries = $AllEntries
+        ReferenceIndex = $ReferenceIndex
+        AffaireIndex = $AffaireIndex
+        PagesFlat = $PagesFlat
+    }
+}
+
+<#
+.SYNOPSIS
     Interface interactive de recherche de références
 
 .DESCRIPTION
     Affiche un menu interactif pour rechercher des références dans le fichier XML
 
-.PARAMETER XmlPath
-    Chemin du fichier XML d'extraction
+.PARAMETER DataPath
+    Chemin du fichier de données (CLIXML, ZIP ou XML)
 
 .EXAMPLE
-    Show-SearchMenu -XmlPath "D:\W\Iveco\RefServeur.xml"
+    Show-SearchGui -DataPath "D:\W\Iveco\References_Extraites.clixml"
 #>
 
 function Show-SearchGui {
     param(
-        [string]$XmlPath
+        [string]$DataPath
     )
 
     # Charger la configuration
@@ -407,45 +503,28 @@ function Show-SearchGui {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    # Vérifier que le fichier XML existe (ou son ZIP)
-    $ZipPath = $XmlPath -replace '\.xml$', '.zip'
-    if (-not ((Test-Path -Path $XmlPath) -or (Test-Path -Path $ZipPath))) {
-        [System.Windows.Forms.MessageBox]::Show("Erreur: Le fichier XML ou ZIP '$XmlPath' n'existe pas", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    # Déterminer automatiquement le chemin des données
+    if ([string]::IsNullOrEmpty($DataPath)) {
+        $RootPath = Split-Path -Path $PSScriptRoot -Parent
+        $DataPath = Join-Path -Path $RootPath -ChildPath "References_Extraites.clixml"
+    } else {
+        # Si le chemin n'a pas d'extension, ajouter .clixml
+        if (-not [System.IO.Path]::HasExtension($DataPath)) {
+            $DataPath = "$DataPath.clixml"
+        }
+    }
+
+    # Vérifier que le fichier CLIXML existe
+    if (-not (Test-Path -Path $DataPath)) {
+        [System.Windows.Forms.MessageBox]::Show("Erreur: Le fichier CLIXML '$DataPath' n'existe pas", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
         return
     }
 
-    # Charger le fichier XML (depuis le ZIP ou directement)
-    $XmlContent = [System.Xml.XmlDocument]::new()
-    
-    # Vérifier si un fichier ZIP existe (déjà défini au-dessus)
-    if (Test-Path -Path $ZipPath) {
-        # Lire le XML depuis le ZIP
-        try {
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            $ZipArchive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
-            $XmlEntry = $ZipArchive.Entries | Where-Object { $_.Name -like "*.xml" } | Select-Object -First 1
-            if ($XmlEntry) {
-                $Stream = $XmlEntry.Open()
-                $XmlContent.Load($Stream)
-                $Stream.Close()
-            }
-            $ZipArchive.Dispose()
-        }
-        catch {
-            Write-Host "Erreur lors de la lecture du ZIP: $_" -ForegroundColor Red
-            return
-        }
-    }
-    elseif (Test-Path -Path $XmlPath) {
-        # Lire le XML directement si le ZIP n'existe pas
-        $XmlContent.Load($XmlPath)
-    }
-    else {
-        Write-Host "Erreur: Ni le fichier XML ni le ZIP n'existent a ce chemin: $XmlPath" -ForegroundColor Red
-        return
-    }
-    
-    $AllEntries = $XmlContent.SelectNodes("//Entree")
+    # Charger l'index en mémoire
+    $SearchIndex = New-SearchIndex -DataPath $DataPath
+    $ReferenceIndex = $SearchIndex.ReferenceIndex
+    $AffaireIndex = $SearchIndex.AffaireIndex
+    $PagesFlat = $SearchIndex.PagesFlat
 
     # Créer la fenêtre principale
     $Version = Get-ProjectVersion
@@ -605,76 +684,83 @@ function Show-SearchGui {
         $Form.Text = "Recherche En cours..."
         $DataGridView.Rows.Clear()
         $FoundCount = 0
+        
+        $SearchStartTime = Get-Date
 
-        foreach ($Entry in $AllEntries) {
-            $Affaire = $Entry.SelectSingleNode("Affaire").InnerText
-            $Poste = $Entry.SelectSingleNode("Poste").InnerText
-            $Archive = $Entry.SelectSingleNode("SOP").InnerText
-            $DateMod = $Entry.SelectSingleNode("DateModification").InnerText
-            $Path = $Entry.SelectSingleNode("Path").InnerText
-            $Auteur = $Entry.SelectSingleNode("Auteur").InnerText
+        # Optimisation avec index: si une seule référence, utiliser l'index direct
+        if ($SearchTerms.Count -eq 1) {
+            # Recherche simple rapide par index
+            $Term = $SearchTerms[0]
+            $MatchedPages = $ReferenceIndex[$Term]
             
-            # Appliquer le filtre marché sur le champ Affaire
-            $AffaireMatchesMarketFilter = $true
-            if (-not [string]::IsNullOrEmpty($MarketFilterValue)) {
-                if ($IsNegativeMarketFilter) {
-                    # Filtre négatif : Affaire ne doit PAS contenir le texte
-                    $AffaireMatchesMarketFilter = -not ($Affaire -like "*$MarketFilterValue*")
-                } else {
-                    # Filtre positif : Affaire doit contenir le texte
-                    $AffaireMatchesMarketFilter = $Affaire -like "*$MarketFilterValue*"
-                }
-            }
-            
-            if (-not $AffaireMatchesMarketFilter) {
-                continue  # Ignorer cette entrée si elle ne correspond pas au filtre marché
-            }
-            
-            # Parcourir les Pages et leurs References
-            $PagesNode = $Entry.SelectSingleNode("Pages")
-            if ($PagesNode) {
-                $Pages = $PagesNode.SelectNodes("Page")
-                foreach ($Page in $Pages) {
-                    $PageName = $Page.SelectSingleNode("Name").InnerText
-                    $ReferencesNode = $Page.SelectSingleNode("References")
-                    if ($ReferencesNode) {
-                        $References = $ReferencesNode.SelectNodes("Reference")
-                        $ReferencesText = @($References | ForEach-Object { $_.InnerText })
-                        $CombinedRefsText = $ReferencesText -join " "
-                        
-                        # Vérifier que TOUS les termes de recherche sont présents dans cette page
-                        $AllTermsFound = $true
-                        foreach ($Term in $SearchTerms) {
-                            if ($CombinedRefsText -notlike "*$Term*") {
-                                $AllTermsFound = $false
-                                break
-                            }
-                        }
-                        
-                        if ($AllTermsFound) {
-                            # Extraire le numéro de page de "slide1.xml" → 1
-                            $PageNumber = ""
-                            if ($PageName -match 'slide(\d+)') {
-                                $PageNumber = $Matches[1]
-                            }
-
-                            # Compter le nombre de références dans la page et formater "X% (Y/Z)"
-                            $NbRefInPage = $References.Count
-                            $NbRefSearched = $SearchTerms.Count
-                            $Percentage = [math]::Round(($NbRefSearched / $NbRefInPage) * 100)
-                            $RefCount = "$Percentage% ($NbRefSearched/$NbRefInPage)"
-
-                            $DataGridView.Rows.Add($Affaire, $Poste, $Archive, $PageNumber, $Auteur, $DateMod, $RefCount, $Path)
-                            $FoundCount++
+            if ($MatchedPages) {
+                foreach ($Page in $MatchedPages) {
+                    # Appliquer le filtre marché
+                    $AffaireMatchesMarketFilter = $true
+                    if (-not [string]::IsNullOrEmpty($MarketFilterValue)) {
+                        if ($IsNegativeMarketFilter) {
+                            $AffaireMatchesMarketFilter = -not ($Page.Affaire -like "*$MarketFilterValue*")
+                        } else {
+                            $AffaireMatchesMarketFilter = $Page.Affaire -like "*$MarketFilterValue*"
                         }
                     }
+                    
+                    if ($AffaireMatchesMarketFilter) {
+                        $NbRefInPage = $Page.References.Count
+                        $Percentage = [math]::Round((1 / $NbRefInPage) * 100)
+                        $RefCount = "$Percentage% (1/$NbRefInPage)"
+                        
+                        $DataGridView.Rows.Add($Page.Affaire, $Page.Poste, $Page.SOP, $Page.PageNumber, $Page.Auteur, $Page.DateModification, $RefCount, $Page.Path)
+                        $FoundCount++
+                    }
+                }
+            }
+        } else {
+            # Recherche multi-référence : chercher les pages contenant TOUTES les références
+            foreach ($Page in $PagesFlat) {
+                # Appliquer le filtre marché
+                $AffaireMatchesMarketFilter = $true
+                if (-not [string]::IsNullOrEmpty($MarketFilterValue)) {
+                    if ($IsNegativeMarketFilter) {
+                        $AffaireMatchesMarketFilter = -not ($Page.Affaire -like "*$MarketFilterValue*")
+                    } else {
+                        $AffaireMatchesMarketFilter = $Page.Affaire -like "*$MarketFilterValue*"
+                    }
+                }
+                
+                if (-not $AffaireMatchesMarketFilter) {
+                    continue
+                }
+                
+                # Vérifier que TOUS les termes sont présents
+                $AllTermsFound = $true
+                $ReferencesText = $Page.References -join " "
+                foreach ($Term in $SearchTerms) {
+                    if ($ReferencesText -notlike "*$Term*") {
+                        $AllTermsFound = $false
+                        break
+                    }
+                }
+                
+                if ($AllTermsFound) {
+                    $NbRefInPage = $Page.References.Count
+                    $NbRefSearched = $SearchTerms.Count
+                    $Percentage = [math]::Round(($NbRefSearched / $NbRefInPage) * 100)
+                    $RefCount = "$Percentage% ($NbRefSearched/$NbRefInPage)"
+                    
+                    $DataGridView.Rows.Add($Page.Affaire, $Page.Poste, $Page.SOP, $Page.PageNumber, $Page.Auteur, $Page.DateModification, $RefCount, $Page.Path)
+                    $FoundCount++
                 }
             }
         }
 
         # Trier par DateModification (décroissant - plus récentes en haut)
-        $DataGridView.Sort($DataGridView.Columns["Date"], [System.ComponentModel.ListSortDirection]::Descending)
-        $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence [$FoundCount resultat(s)] V$Version"
+        if ($DataGridView.Rows.Count -gt 0) {
+            $DataGridView.Sort($DataGridView.Columns["Date"], [System.ComponentModel.ListSortDirection]::Descending)
+        }
+        
+        $SearchDuration = (Get-Date) - $SearchStartTime
+        $Form.Text = "Recherche SOP avec r" + [char]233 + "f" + [char]233 + "rence [$FoundCount resultat(s) en $($SearchDuration.TotalMilliseconds)ms] V$Version"
     
     })
 

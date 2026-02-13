@@ -50,7 +50,7 @@ Write-Host ""
 Get-WelcomeMessage -Message "Extraction de references depuis l'arborescence des affaires"
 Get-SystemInfo
 
-# Lancer l'extraction sur l'arborescence
+# Lancer l'extraction sur l'arborescence (génère automatiquement du CLIXML)
 Export-PptxReferencesFromTree -RootPath $RootPath -OutputFile $OutputFile -SubPathStructure $SubPathStructure
 
 Write-Host ""
