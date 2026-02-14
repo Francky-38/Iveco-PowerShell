@@ -794,8 +794,62 @@ function Show-SearchGui {
 
     # Événement double-clic sur une cellule de la colonne SOP pour ouvrir le fichier
     $DataGridView.Add_CellDoubleClick({
-        if ($_.ColumnIndex -le 2) {  # Colonne 2 = SOP
-            $RowIndex = $_.RowIndex
+        $RowIndex = $_.RowIndex
+        
+        # Colonne 0 = Marché (Affaire)
+        if ($_.ColumnIndex -eq 0) {
+            $Affaire = $DataGridView.Rows[$RowIndex].Cells[0].Value
+            
+            # Construire le chemin du dossier Affaire
+            $AffairePath = Join-Path -Path $Config.ExtractionRootPath -ChildPath $Affaire
+            
+            if (Test-Path $AffairePath) {
+                try {
+                    Invoke-Item $AffairePath
+                }
+                catch {
+                    [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture du dossier Marche: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Dossier Marche non trouve: $AffairePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            }
+        }
+        
+        # Colonne 1 = Poste
+        if ($_.ColumnIndex -eq 1) {
+            $Affaire = $DataGridView.Rows[$RowIndex].Cells[0].Value
+            $Poste = $DataGridView.Rows[$RowIndex].Cells[1].Value
+            
+            # Construire le chemin du dossier Poste
+            # Essayer d'abord avec le premier sous-chemin de la config
+            $PostePath = $null
+            foreach ($SubPath in $Config.SubPathStructures) {
+                $PossiblePath = Join-Path -Path $Config.ExtractionRootPath -ChildPath $Affaire | Join-Path -ChildPath $SubPath | Join-Path -ChildPath $Poste
+                if (Test-Path $PossiblePath) {
+                    $PostePath = $PossiblePath
+                    break
+                }
+            }
+            
+            # Si pas trouvé avec SubPathStructures, essayer directement dans l'Affaire
+            if (-not $PostePath) {
+                $PostePath = Join-Path -Path $Config.ExtractionRootPath -ChildPath $Affaire | Join-Path -ChildPath $Poste
+            }
+            
+            if (Test-Path $PostePath) {
+                try {
+                    Invoke-Item $PostePath
+                }
+                catch {
+                    [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture du dossier Poste: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+                }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Dossier Poste non trouve: $PostePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            }
+        }
+        
+        # Colonne 2 = SOP
+        if ($_.ColumnIndex -eq 2) {
             $FilePath = $DataGridView.Rows[$RowIndex].Cells[7].Value
             
             if (Test-Path $FilePath) {
@@ -809,10 +863,11 @@ function Show-SearchGui {
                 [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
             }
         }
-        if ($_.ColumnIndex -eq 3) {  # Colonne 3 = Page
-            $RowIndex = $_.RowIndex
+        
+        # Colonne 3 = Page
+        if ($_.ColumnIndex -eq 3) {
             $FilePath = $DataGridView.Rows[$RowIndex].Cells[7].Value
-            $index=$DataGridView.Rows[$RowIndex].Cells[3].Value
+            $index = $DataGridView.Rows[$RowIndex].Cells[3].Value
             
             if (Test-Path $FilePath) {
                 try {
