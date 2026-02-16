@@ -362,8 +362,12 @@ function Export-PptxReferencesFromTree {
             }
         }
 
-        # Sauvegarder au format CLIXML PowerShell
-        $AllEntries | Export-Clixml -Path $OutputFile -Force
+        # Créer les index en mémoire et sauvegarder une base pré-indexée
+        # (le temps de création des index est absorbé ici, en tâche de fond)
+        Write-Host "Creation des index et sauvegarde base pre-indexee..." -ForegroundColor Yellow
+        $SearchIndex = Build-SearchIndexes -AllEntries $AllEntries
+        $SearchIndex.IndexVersion = 1  # Marqueur pour New-SearchIndex (format pre-indexe)
+        $SearchIndex | Export-Clixml -Path $OutputFile -Force
         $OutputPath = $OutputFile
         Write-Host "  - Fichier CLIXML sauvegarde: $OutputFile" -ForegroundColor Cyan
         $FileSize = (Get-Item $OutputFile).Length / 1MB
@@ -391,10 +395,65 @@ function Export-PptxReferencesFromTree {
 
 <#
 .SYNOPSIS
+    Construit les index de recherche en mémoire à partir des entrées brutes (usage interne)
+
+.DESCRIPTION
+    Crée ReferenceIndex, AffaireIndex et PagesFlat pour la recherche rapide.
+#>
+function Build-SearchIndexes {
+    param([Parameter(Mandatory=$true)] $AllEntries)
+
+    $ReferenceIndex = @{}
+    $AffaireIndex = @{}
+    $PagesFlat = @()
+
+    foreach ($Entry in $AllEntries) {
+        $Affaire = $Entry.Affaire
+        if (-not $AffaireIndex.ContainsKey($Affaire)) {
+            $AffaireIndex[$Affaire] = @()
+        }
+
+        foreach ($Page in $Entry.Pages) {
+            $PageKey = @{
+                Affaire = $Entry.Affaire
+                Poste = $Entry.Poste
+                SOP = $Entry.SOP
+                Path = $Entry.Path
+                DateModification = $Entry.DateModification
+                Auteur = $Entry.Auteur
+                PageName = $Page.Name
+                References = $Page.References
+                PageNumber = if ($Page.Name -match 'slide(\d+)') { [int]$Matches[1] } else { 0 }
+            }
+
+            $PagesFlat += $PageKey
+            $AffaireIndex[$Affaire] += $PageKey
+
+            foreach ($Ref in $Page.References) {
+                if (-not $ReferenceIndex.ContainsKey($Ref)) {
+                    $ReferenceIndex[$Ref] = @()
+                }
+                $ReferenceIndex[$Ref] += $PageKey
+            }
+        }
+    }
+
+    return @{
+        AllEntries = $AllEntries
+        ReferenceIndex = $ReferenceIndex
+        AffaireIndex = $AffaireIndex
+        PagesFlat = $PagesFlat
+    }
+}
+
+<#
+.SYNOPSIS
     Charge les données d'extraction et crée des index en mémoire pour recherche rapide
 
 .DESCRIPTION
-    Charge les données depuis le fichier binaire ou ZIP et crée des index pour accès O(1)
+    Charge les données depuis le fichier binaire ou ZIP et crée des index pour accès O(1).
+    Si le fichier est au format pré-indexé (généré par Export-PptxReferencesFromTree V2),
+    les index sont chargés directement sans recalcul.
 
 .PARAMETER DataPath
     Chemin du fichier de données (CLIXML ou ZIP)
@@ -417,70 +476,21 @@ function New-SearchIndex {
         return $null
     }
     
-    # Charger le fichier CLIXML
-    Write-Host "  Format: CLIXML PowerShell" -ForegroundColor Cyan
+    # Charger le fichier CLIXML (format pré-indexé généré par Export-PptxReferencesFromTree)
+    Write-Host "  Format: CLIXML pre-indexe" -ForegroundColor Cyan
     try {
-        $AllEntries = Import-Clixml -Path $DataPath
+        $SearchIndex = Import-Clixml -Path $DataPath
     }
     catch {
         Write-Host "Erreur lors du chargement du fichier CLIXML: $_" -ForegroundColor Red
         return $null
     }
-    
-    # Créer les index en mémoire
-    Write-Host "Creation des index en memoire..." -ForegroundColor Yellow
-    
-    # Index 1: Par référence (rapidité pour recherche simple)
-    $ReferenceIndex = @{}
-    # Index 2: Par affaire (pour filtrage marché)
-    $AffaireIndex = @{}
-    # Index 3: Page plat (pour recherche multi-ref)
-    $PagesFlat = @()
-    
-    foreach ($Entry in $AllEntries) {
-        # Index par affaire
-        $Affaire = $Entry.Affaire
-        if (-not $AffaireIndex.ContainsKey($Affaire)) {
-            $AffaireIndex[$Affaire] = @()
-        }
-        
-        foreach ($Page in $Entry.Pages) {
-            $PageKey = @{
-                Affaire = $Entry.Affaire
-                Poste = $Entry.Poste
-                SOP = $Entry.SOP
-                Path = $Entry.Path
-                DateModification = $Entry.DateModification
-                Auteur = $Entry.Auteur
-                PageName = $Page.Name
-                References = $Page.References
-                PageNumber = if ($Page.Name -match 'slide(\d+)') { [int]$Matches[1] } else { 0 }
-            }
-            
-            $PagesFlat += $PageKey
-            $AffaireIndex[$Affaire] += $PageKey
-            
-            # Index par référence
-            foreach ($Ref in $Page.References) {
-                if (-not $ReferenceIndex.ContainsKey($Ref)) {
-                    $ReferenceIndex[$Ref] = @()
-                }
-                $ReferenceIndex[$Ref] += $PageKey
-            }
-        }
-    }
-    
+
     $LoadTime = (Get-Date) - $StartLoadTime
-    Write-Host "  Donnees chargees: $($PagesFlat.Count) pages, $($ReferenceIndex.Count) references uniques" -ForegroundColor Cyan
+    Write-Host "  Donnees chargees: $($SearchIndex.PagesFlat.Count) pages, $($SearchIndex.ReferenceIndex.Count) references uniques" -ForegroundColor Cyan
     Write-Host "  Temps de chargement: $($LoadTime.TotalSeconds) secondes" -ForegroundColor Cyan
-    
-    # Retourner l'objet d'index
-    return @{
-        AllEntries = $AllEntries
-        ReferenceIndex = $ReferenceIndex
-        AffaireIndex = $AffaireIndex
-        PagesFlat = $PagesFlat
-    }
+
+    return $SearchIndex
 }
 
 <#
