@@ -2,7 +2,7 @@
 
 # Variables globales
 $Global:ProjectName = "MY-Project-PowerShell"
-$Global:ProjectVersion = "8.2.0"
+$Global:ProjectVersion = "8.2.1"
 $Global:ProjectAuthor = "Franck Ginhoux"
 
 # Paramètres
@@ -14,7 +14,12 @@ $Config = @{
 
 # Paramètres d'extraction et recherche des references
 $Config.ExtractionRootPath = "D:\W\Iveco\serveur"
-$Config.ExtractXmlData = "D:\W\Iveco\RefServeur"
+# Chemin relatif du fichier de données (base sans extension) - a la racine du projet
+$Config.ExtractXmlData = "RefServeur"
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$Config.ExtractXmlDataPath = Join-Path -Path $ProjectRoot -ChildPath $Config.ExtractXmlData
+# Regex pour extraire les references (ex: [THRS]? suivi de 5 a 10 chiffres)
+$Config.ReferenceRegexPattern = '[THRS]?\d{5,10}'
 
 # Sous-chemins à scruter dans chaque dossier d'affaire
 # Laissez vide pour scruter directement le dossier d'affaire

@@ -32,7 +32,7 @@ if ([string]::IsNullOrEmpty($RootPath)) {
     $RootPath = $Config.ExtractionRootPath
 }
 if ([string]::IsNullOrEmpty($OutputFile)) {
-    $OutputFile = $Config.ExtractXmlData
+    $OutputFile = $Config.ExtractXmlDataPath
 }
 if ($SubPathStructures.Count -eq 0) {
     $SubPathStructures = $Config.SubPathStructures

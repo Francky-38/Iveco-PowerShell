@@ -225,9 +225,8 @@ function Export-PptxReferencesFromTree {
                                             foreach ($TextNode in $TextNodes) {
                                                 $Text = $TextNode.InnerText.Trim()
                                                 
-                                                # Chercher toutes les références dans le texte
-                                                # Format: [TRS]?\d{5,10} (peut être au milieu d'une chaîne)
-                                                $References = [regex]::Matches($Text, '[THRS]?\d{5,10}')
+                                                # Chercher toutes les références dans le texte (pattern depuis config)
+                                                $References = [regex]::Matches($Text, $Config.ReferenceRegexPattern)
                                                 
                                                 foreach ($RefMatch in $References) {
                                                     $Reference = $RefMatch.Value
@@ -524,13 +523,10 @@ function Show-SearchGui {
 
     # Déterminer automatiquement le chemin des données
     if ([string]::IsNullOrEmpty($DataPath)) {
-        $RootPath = Split-Path -Path $PSScriptRoot -Parent
-        $DataPath = Join-Path -Path $RootPath -ChildPath "References_Extraites.clixml"
-    } else {
-        # Si le chemin n'a pas d'extension, ajouter .clixml
-        if (-not [System.IO.Path]::HasExtension($DataPath)) {
-            $DataPath = "$DataPath.clixml"
-        }
+        $DataPath = $Config.ExtractXmlDataPath
+    }
+    if (-not [System.IO.Path]::HasExtension($DataPath)) {
+        $DataPath = "$DataPath.clixml"
     }
 
     # Vérifier que le fichier CLIXML existe

@@ -26,7 +26,7 @@ $ConfigPath = Join-Path -Path $PSScriptRoot -ChildPath "..\Configs\config.ps1"
 
 # Utiliser la valeur de config si le paramètre n'est pas fourni
 if ([string]::IsNullOrEmpty($DataPath)) {
-    $DataPath = $Config.ExtractXmlData
+    $DataPath = $Config.ExtractXmlDataPath
 }
 
 # Charger les fonctions
