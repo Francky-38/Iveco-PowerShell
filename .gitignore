@@ -11,6 +11,8 @@ Tmp/
 
 # Fichiers de sortie d'extraction
 RefServeur.xml
+RefServeur.clixml
+RefServeur.zip
 References_Extraites.xml
 *.xml
 

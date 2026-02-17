@@ -120,10 +120,11 @@ function Export-PptxReferencesFromTree {
         $OutputFile = [System.IO.Path]::ChangeExtension($OutputFile, "clixml")
     }
 
+    $ZipOutputPath = [System.IO.Path]::ChangeExtension($OutputFile, "zip")
     Write-Host "`nRecherche des fichiers PPTX dans l'arborescence..." -ForegroundColor Yellow
     Write-Host "Chemin racine: $RootPath" -ForegroundColor Cyan
     Write-Host "Sous-chemins a scruter: $($SubPathStructures -join ', ')" -ForegroundColor Cyan
-    Write-Host "Sortie: $OutputFile" -ForegroundColor Cyan
+    Write-Host "Sortie (ZIP): $ZipOutputPath" -ForegroundColor Cyan
 
     # Créer le fichier XML de sortie principal
     $XmlOutput = New-Object System.Xml.XmlDocument
@@ -367,10 +368,27 @@ function Export-PptxReferencesFromTree {
         $SearchIndex = Build-SearchIndexes -AllEntries $AllEntries
         $SearchIndex.IndexVersion = 1  # Marqueur pour New-SearchIndex (format pre-indexe)
         $SearchIndex | Export-Clixml -Path $OutputFile -Force
-        $OutputPath = $OutputFile
         Write-Host "  - Fichier CLIXML sauvegarde: $OutputFile" -ForegroundColor Cyan
-        $FileSize = (Get-Item $OutputFile).Length / 1MB
-        Write-Host "  - Taille du fichier: $([math]::Round($FileSize, 2)) MB" -ForegroundColor Cyan
+        $FileSizeClixml = (Get-Item $OutputFile).Length / 1MB
+        Write-Host "  - Taille CLIXML: $([math]::Round($FileSizeClixml, 2)) MB" -ForegroundColor Cyan
+
+        # Compresser le .clixml en ZIP et supprimer le fichier non compressé
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $ZipPath = [System.IO.Path]::ChangeExtension($OutputFile, "zip")
+        $ClixmlName = [System.IO.Path]::GetFileName($OutputFile)
+        if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
+        $ZipArchive = [System.IO.Compression.ZipFile]::Open($ZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+        try {
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($ZipArchive, $OutputFile, $ClixmlName, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+        finally {
+            $ZipArchive.Dispose()
+        }
+        Remove-Item $OutputFile -Force
+        $OutputPath = $ZipPath
+        $FileSizeZip = (Get-Item $ZipPath).Length / 1MB
+        Write-Host "  - Fichier ZIP cree: $ZipPath" -ForegroundColor Cyan
+        Write-Host "  - Taille ZIP: $([math]::Round($FileSizeZip, 2)) MB" -ForegroundColor Cyan
         
         Write-Host ""
         
@@ -465,23 +483,66 @@ function New-SearchIndex {
     param(
         [string]$DataPath
     )
-    
+
     $StartLoadTime = Get-Date
     Write-Host "Chargement des donnees CLIXML..." -ForegroundColor Yellow
-    
-    # Vérifier l'existence du fichier
-    if (-not (Test-Path -Path $DataPath)) {
-        Write-Host "Erreur: Le fichier '$DataPath' n'existe pas" -ForegroundColor Red
+
+    # Resoudre le chemin : .zip prioritaire, puis .clixml
+    $PathToLoad = $null
+    if ([System.IO.Path]::HasExtension($DataPath)) {
+        if ((Test-Path $DataPath)) {
+            $PathToLoad = $DataPath
+        }
+    }
+    else {
+        $ZipPath = "$DataPath.zip"
+        $ClixmlPath = "$DataPath.clixml"
+        if (Test-Path $ZipPath) {
+            $PathToLoad = $ZipPath
+        }
+        elseif (Test-Path $ClixmlPath) {
+            $PathToLoad = $ClixmlPath
+        }
+    }
+
+    if (-not $PathToLoad) {
+        Write-Host "Erreur: Aucun fichier trouve pour '$DataPath' (.zip ou .clixml)" -ForegroundColor Red
         return $null
     }
-    
-    # Charger le fichier CLIXML (format pré-indexé généré par Export-PptxReferencesFromTree)
-    Write-Host "  Format: CLIXML pre-indexe" -ForegroundColor Cyan
+
     try {
-        $SearchIndex = Import-Clixml -Path $DataPath
+        if ([System.IO.Path]::GetExtension($PathToLoad) -eq ".zip") {
+            Write-Host "  Format: ZIP (CLIXML pre-indexe)" -ForegroundColor Cyan
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $ZipArchive = [System.IO.Compression.ZipFile]::OpenRead($PathToLoad)
+            try {
+                $ClixmlEntry = $ZipArchive.Entries | Where-Object { $_.Name -like "*.clixml" } | Select-Object -First 1
+                if (-not $ClixmlEntry) {
+                    Write-Host "Erreur: Aucun fichier .clixml dans l'archive ZIP" -ForegroundColor Red
+                    return $null
+                }
+                $TempFile = [System.IO.Path]::GetTempFileName()
+                $TempClixml = [System.IO.Path]::ChangeExtension($TempFile, "clixml")
+                Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
+                $ClixmlEntry.ExtractToFile($TempClixml, $true)
+                try {
+                    $SearchIndex = Import-Clixml -Path $TempClixml
+                }
+                finally {
+                    Remove-Item $TempClixml -Force -ErrorAction SilentlyContinue
+                }
+            }
+            finally {
+                $ZipArchive.Dispose()
+            }
+        }
+        else {
+            Write-Host "  Format: CLIXML pre-indexe" -ForegroundColor Cyan
+            $SearchIndex = Import-Clixml -Path $PathToLoad
+        }
     }
     catch {
-        Write-Host "Erreur lors du chargement du fichier CLIXML: $_" -ForegroundColor Red
+        Write-Host "Erreur lors du chargement: $_" -ForegroundColor Red
         return $null
     }
 
@@ -521,17 +582,17 @@ function Show-SearchGui {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    # Déterminer automatiquement le chemin des données
+    # Déterminer automatiquement le chemin des données (base sans extension)
+    # New-SearchIndex résout .zip en priorité, puis .clixml
     if ([string]::IsNullOrEmpty($DataPath)) {
         $DataPath = $Config.ExtractXmlDataPath
     }
-    if (-not [System.IO.Path]::HasExtension($DataPath)) {
-        $DataPath = "$DataPath.clixml"
-    }
 
-    # Vérifier que le fichier CLIXML existe
-    if (-not (Test-Path -Path $DataPath)) {
-        [System.Windows.Forms.MessageBox]::Show("Erreur: Le fichier CLIXML '$DataPath' n'existe pas", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    # Vérifier qu'un fichier de données existe (.zip ou .clixml)
+    $ZipPath = "$DataPath.zip"
+    $ClixmlPath = "$DataPath.clixml"
+    if (-not (Test-Path $ZipPath) -and -not (Test-Path $ClixmlPath)) {
+        [System.Windows.Forms.MessageBox]::Show("Erreur: Aucun fichier de donnees trouve pour '$DataPath' (.zip ou .clixml)", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
         return
     }
 
