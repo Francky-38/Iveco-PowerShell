@@ -216,14 +216,18 @@ function Export-PptxReferencesFromTree {
                                             $XmlContent.Load($Stream)
                                             $Stream.Close()
                                             
-                                            # Récupérer tous les nœuds <a:t> avec gestion du namespace
+                                            # Récupérer tous les nœuds <a:r> (run) avec gestion du namespace
                                             $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($XmlContent.NameTable)
                                             $NamespaceManager.AddNamespace("a", "http://schemas.openxmlformats.org/drawingml/2006/main")
-                                            $TextNodes = $XmlContent.SelectNodes("//a:t", $NamespaceManager)
+                                            $RunNodes = $XmlContent.SelectNodes("//a:r", $NamespaceManager)
                                             
-                                            # Collecter toutes les références de ce slide
+                                            # Collecter toutes les références de ce slide avec leur type
                                             $SlideReferences = @()
-                                            foreach ($TextNode in $TextNodes) {
+                                            foreach ($RunNode in $RunNodes) {
+                                                # Récupérer le texte du nœud <a:t>
+                                                $TextNode = $RunNode.SelectSingleNode("a:t", $NamespaceManager)
+                                                if (-not $TextNode) { continue }
+                                                
                                                 $Text = $TextNode.InnerText.Trim()
                                                 
                                                 # Chercher toutes les références dans le texte (pattern depuis config)
@@ -231,7 +235,26 @@ function Export-PptxReferencesFromTree {
                                                 
                                                 foreach ($RefMatch in $References) {
                                                     $Reference = $RefMatch.Value
-                                                    $SlideReferences += $Reference
+                                                    
+                                                    # Déterminer le type de référence (S ou H)
+                                                    $RefType = "H"  # Défaut
+                                                    $RunPrNode = $RunNode.SelectSingleNode("a:rPr", $NamespaceManager)
+                                                    if ($RunPrNode) {
+                                                        $SolidFillNode = $RunPrNode.SelectSingleNode("a:solidFill", $NamespaceManager)
+                                                        if (-not $SolidFillNode) {
+                                                            $RefType = "S"
+                                                        } else {
+                                                            $SrgbClrNode = $SolidFillNode.SelectSingleNode("a:srgbClr[@val='0000FF']", $NamespaceManager)
+                                                            if ($SrgbClrNode) {
+                                                                $RefType = "S"
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    $SlideReferences += @{
+                                                        Value = $Reference
+                                                        Type = $RefType
+                                                    }
                                                 }
                                             }
                                             
@@ -293,7 +316,8 @@ function Export-PptxReferencesFromTree {
                                             $ReferencesElem = $XmlOutput.CreateElement("References")
                                             foreach ($Ref in $SlideData.References) {
                                                 $RefElem = $XmlOutput.CreateElement("Reference")
-                                                $RefElem.InnerText = $Ref
+                                                $RefElem.InnerText = $Ref.Value
+                                                $RefElem.SetAttribute("Type", $Ref.Type)
                                                 $ReferencesElem.AppendChild($RefElem) | Out-Null
                                             }
                                             $PageElem.AppendChild($ReferencesElem) | Out-Null
@@ -342,7 +366,12 @@ function Export-PptxReferencesFromTree {
                     $References = @()
                     $ReferencesNode = $PageNode.SelectSingleNode("References")
                     if ($ReferencesNode) {
-                        $References = $ReferencesNode.SelectNodes("Reference") | ForEach-Object { $_.InnerText }
+                        $References = $ReferencesNode.SelectNodes("Reference") | ForEach-Object {
+                            @{
+                                Value = $_.InnerText
+                                Type = $_.GetAttribute("Type")
+                            }
+                        }
                     }
                     [PSCustomObject]@{
                         Name = $PageNode.SelectSingleNode("Name").InnerText
