@@ -4,16 +4,16 @@
 
 .DESCRIPTION
     Affiche une interface WinForms pour rechercher des références
-    dans le fichier de donnees (CLIXML, ZIP ou XML) genere par le script d'extraction
+    dans le fichier ZIP genere par le script d'extraction
 
 .PARAMETER DataPath
-    Chemin du fichier de donnees (CLIXML, ZIP ou XML)
-    Par defaut: recherche automatiquement le fichier disponible
+    Chemin du fichier ZIP (base sans extension ou .zip)
+    Par defaut: valeur de config ExtractXmlDataPath
 
 .EXAMPLE
     .\Scripts\SearchGui-References.ps1
     
-    .\Scripts\SearchGui-References.ps1 -DataPath "D:\resultats.clixml"
+    .\Scripts\SearchGui-References.ps1 -DataPath "D:\RefServeur"
 #>
 
 param(

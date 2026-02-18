@@ -465,18 +465,16 @@ function Build-SearchIndexes {
 
 <#
 .SYNOPSIS
-    Charge les données d'extraction et crée des index en mémoire pour recherche rapide
+    Charge les données pré-indexées depuis un fichier ZIP
 
 .DESCRIPTION
-    Charge les données depuis le fichier binaire ou ZIP et crée des index pour accès O(1).
-    Si le fichier est au format pré-indexé (généré par Export-PptxReferencesFromTree V2),
-    les index sont chargés directement sans recalcul.
+    Extrait le CLIXML du ZIP et charge les index en mémoire (format généré par Export-PptxReferencesFromTree)
 
 .PARAMETER DataPath
-    Chemin du fichier de données (CLIXML ou ZIP)
+    Chemin du fichier ZIP (avec ou sans extension .zip)
 
 .EXAMPLE
-    $SearchIndex = New-SearchIndex -DataPath "D:\W\Iveco\References_Extraites.clixml"
+    $SearchIndex = New-SearchIndex -DataPath "D:\W\Iveco\RefServeur"
 #>
 
 function New-SearchIndex {
@@ -485,60 +483,48 @@ function New-SearchIndex {
     )
 
     $StartLoadTime = Get-Date
-    Write-Host "Chargement des donnees CLIXML..." -ForegroundColor Yellow
+    Write-Host "Chargement des donnees ZIP..." -ForegroundColor Yellow
 
-    # Resoudre le chemin : .zip prioritaire, puis .clixml
-    $PathToLoad = $null
-    if ([System.IO.Path]::HasExtension($DataPath)) {
-        if ((Test-Path $DataPath)) {
-            $PathToLoad = $DataPath
-        }
-    }
-    else {
-        $ZipPath = "$DataPath.zip"
-        $ClixmlPath = "$DataPath.clixml"
-        if (Test-Path $ZipPath) {
-            $PathToLoad = $ZipPath
-        }
-        elseif (Test-Path $ClixmlPath) {
-            $PathToLoad = $ClixmlPath
-        }
-    }
-
-    if (-not $PathToLoad) {
-        Write-Host "Erreur: Aucun fichier trouve pour '$DataPath' (.zip ou .clixml)" -ForegroundColor Red
+    $ZipPath = if ([System.IO.Path]::HasExtension($DataPath)) { $DataPath } else { "$DataPath.zip" }
+    if (-not (Test-Path $ZipPath)) {
+        Write-Host "Erreur: Le fichier '$ZipPath' n'existe pas" -ForegroundColor Red
         return $null
     }
 
     try {
-        if ([System.IO.Path]::GetExtension($PathToLoad) -eq ".zip") {
-            Write-Host "  Format: ZIP (CLIXML pre-indexe)" -ForegroundColor Cyan
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            $ZipArchive = [System.IO.Compression.ZipFile]::OpenRead($PathToLoad)
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $ZipArchive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        try {
+            $ClixmlEntry = $ZipArchive.Entries | Where-Object { $_.Name -like "*.clixml" } | Select-Object -First 1
+            if (-not $ClixmlEntry) {
+                Write-Host "Erreur: Aucun fichier .clixml dans l'archive ZIP" -ForegroundColor Red
+                return $null
+            }
+            $TempFile = [System.IO.Path]::GetTempFileName()
+            $TempClixml = [System.IO.Path]::ChangeExtension($TempFile, "clixml")
+            Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
+            $EntryStream = $ClixmlEntry.Open()
             try {
-                $ClixmlEntry = $ZipArchive.Entries | Where-Object { $_.Name -like "*.clixml" } | Select-Object -First 1
-                if (-not $ClixmlEntry) {
-                    Write-Host "Erreur: Aucun fichier .clixml dans l'archive ZIP" -ForegroundColor Red
-                    return $null
-                }
-                $TempFile = [System.IO.Path]::GetTempFileName()
-                $TempClixml = [System.IO.Path]::ChangeExtension($TempFile, "clixml")
-                Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
-                $ClixmlEntry.ExtractToFile($TempClixml, $true)
+                $FileStream = [System.IO.File]::Create($TempClixml)
                 try {
-                    $SearchIndex = Import-Clixml -Path $TempClixml
+                    $EntryStream.CopyTo($FileStream)
                 }
                 finally {
-                    Remove-Item $TempClixml -Force -ErrorAction SilentlyContinue
+                    $FileStream.Close()
                 }
             }
             finally {
-                $ZipArchive.Dispose()
+                $EntryStream.Close()
+            }
+            try {
+                $SearchIndex = Import-Clixml -Path $TempClixml
+            }
+            finally {
+                Remove-Item $TempClixml -Force -ErrorAction SilentlyContinue
             }
         }
-        else {
-            Write-Host "  Format: CLIXML pre-indexe" -ForegroundColor Cyan
-            $SearchIndex = Import-Clixml -Path $PathToLoad
+        finally {
+            $ZipArchive.Dispose()
         }
     }
     catch {
@@ -561,10 +547,10 @@ function New-SearchIndex {
     Affiche un menu interactif pour rechercher des références dans le fichier XML
 
 .PARAMETER DataPath
-    Chemin du fichier de données (CLIXML, ZIP ou XML)
+    Chemin du fichier ZIP (base sans extension ou chemin complet .zip)
 
 .EXAMPLE
-    Show-SearchGui -DataPath "D:\W\Iveco\References_Extraites.clixml"
+    Show-SearchGui -DataPath "D:\W\Iveco\RefServeur"
 #>
 
 function Show-SearchGui {
@@ -582,17 +568,14 @@ function Show-SearchGui {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    # Déterminer automatiquement le chemin des données (base sans extension)
-    # New-SearchIndex résout .zip en priorité, puis .clixml
+    # Déterminer le chemin des données (base sans extension)
     if ([string]::IsNullOrEmpty($DataPath)) {
         $DataPath = $Config.ExtractXmlDataPath
     }
 
-    # Vérifier qu'un fichier de données existe (.zip ou .clixml)
-    $ZipPath = "$DataPath.zip"
-    $ClixmlPath = "$DataPath.clixml"
-    if (-not (Test-Path $ZipPath) -and -not (Test-Path $ClixmlPath)) {
-        [System.Windows.Forms.MessageBox]::Show("Erreur: Aucun fichier de donnees trouve pour '$DataPath' (.zip ou .clixml)", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    $ZipPath = if ([System.IO.Path]::HasExtension($DataPath)) { $DataPath } else { "$DataPath.zip" }
+    if (-not (Test-Path $ZipPath)) {
+        [System.Windows.Forms.MessageBox]::Show("Erreur: Le fichier ZIP '$ZipPath' n'existe pas", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
         return
     }
 
@@ -771,7 +754,7 @@ function Show-SearchGui {
         if ($SearchTerms.Count -eq 1) {
             # Recherche simple rapide par index
             $Term = $SearchTerms[0]
-            $MatchedPages = $ReferenceIndex[$Term]
+            $MatchedPages = if ($ReferenceIndex -ne $null) { $ReferenceIndex[$Term] } else { $null }
             
             if ($MatchedPages) {
                 foreach ($Page in $MatchedPages) {
