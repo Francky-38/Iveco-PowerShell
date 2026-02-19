@@ -575,6 +575,39 @@ function New-SearchIndex {
 
 <#
 .SYNOPSIS
+    Retourne l'ensemble des references de type 'H' pour un marche (Affaire)
+
+.PARAMETER SearchIndex
+    Index de recherche charge par New-SearchIndex
+
+.PARAMETER Affaire
+    Nom de l'affaire/marche
+#>
+function Get-MarketHReferences {
+    param(
+        [Parameter(Mandatory=$true)] $SearchIndex,
+        [Parameter(Mandatory=$true)] [string]$Affaire
+    )
+    $Result = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if (-not $SearchIndex.AffaireIndex -or -not $SearchIndex.AffaireIndex.ContainsKey($Affaire)) {
+        return @($Result)
+    }
+    foreach ($Page in $SearchIndex.AffaireIndex[$Affaire]) {
+        $Details = $Page.ReferenceDetails
+        if (-not $Details) { $Details = @() }
+        foreach ($RefDetail in $Details) {
+            $Val = if ($RefDetail.Value) { $RefDetail.Value } elseif ($RefDetail["Value"]) { $RefDetail["Value"] } else { $null }
+            $Typ = if ($RefDetail.Type) { $RefDetail.Type } elseif ($RefDetail["Type"]) { $RefDetail["Type"] } else { $null }
+            if ($Val -and $Typ -eq "H") {
+                [void]$Result.Add($Val)
+            }
+        }
+    }
+    return @($Result)
+}
+
+<#
+.SYNOPSIS
     Interface interactive de recherche de références
 
 .DESCRIPTION
