@@ -460,6 +460,9 @@ function Build-SearchIndexes {
         }
 
         foreach ($Page in $Entry.Pages) {
+            # Extraire les valeurs des références pour stocker uniquement les strings
+            $ReferenceValues = @($Page.References | ForEach-Object { $_.Value })
+            
             $PageKey = @{
                 Affaire = $Entry.Affaire
                 Poste = $Entry.Poste
@@ -468,18 +471,20 @@ function Build-SearchIndexes {
                 DateModification = $Entry.DateModification
                 Auteur = $Entry.Auteur
                 PageName = $Page.Name
-                References = $Page.References
+                References = $ReferenceValues  # Stocker les valeurs uniquement pour la recherche
+                ReferenceDetails = $Page.References  # Garder les détails (Value+Type) pour les affichages
                 PageNumber = if ($Page.Name -match 'slide(\d+)') { [int]$Matches[1] } else { 0 }
             }
 
             $PagesFlat += $PageKey
             $AffaireIndex[$Affaire] += $PageKey
 
-            foreach ($Ref in $Page.References) {
-                if (-not $ReferenceIndex.ContainsKey($Ref)) {
-                    $ReferenceIndex[$Ref] = @()
+            foreach ($RefDetail in $Page.References) {
+                $RefValue = $RefDetail.Value
+                if (-not $ReferenceIndex.ContainsKey($RefValue)) {
+                    $ReferenceIndex[$RefValue] = @()
                 }
-                $ReferenceIndex[$Ref] += $PageKey
+                $ReferenceIndex[$RefValue] += $PageKey
             }
         }
     }
