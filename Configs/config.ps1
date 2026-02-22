@@ -46,5 +46,9 @@ $Config.SubPathStructures = @(
 $Config.BaseName = "Locale" #"Globale" #"locale"
 $Config.FormBackColor = "Honeydew" #"WhiteSmoke"  #"Honeydew"
 
+# Parametres pour la comparaison des references Excel
+$Config.ExcelTypeColumn = 3           # Colonne Excel contenant le type de reference (S ou H)
+$Config.ExcelReferenceColumn = 14     # Colonne Excel contenant la reference
+
 # Export des paramètres
 $Config

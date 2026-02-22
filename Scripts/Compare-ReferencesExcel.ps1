@@ -42,8 +42,79 @@ if (-not $SearchIndex) {
     exit 1
 }
 
+function Mark-NewReferencesInExcel {
+    param(
+        [string]$ExcelPath,
+        $Index,
+        $Config,
+        $LabelResult
+    )
+    if (-not $ExcelPath -or -not (Test-Path $ExcelPath)) {
+        [System.Windows.Forms.MessageBox]::Show("Chemin Excel invalide ou fichier inexistant.", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        return
+    }
+    try {
+        $Excel = New-Object -ComObject Excel.Application
+        $Excel.Visible = $true
+        $Excel.DisplayAlerts = $false
+        $Workbook = $Excel.Workbooks.Open($ExcelPath, 0, $false)
+        $Sheet = $Workbook.Sheets.Item(1)
+
+        # Collecter toutes les refs H de la base (tous les marchés)
+        $AllBaseRefs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($Affaire in @($Index.AffaireIndex.Keys)) {
+            $MarketRefs = Get-MarketHReferences -SearchIndex $Index -Affaire $Affaire
+            foreach ($ref in $MarketRefs) {
+                [void]$AllBaseRefs.Add($ref)
+            }
+        }
+
+        # Parcourir les refs du fichier Excel et colorer
+        $UsedRange = $Sheet.UsedRange
+        $MaxRow = $UsedRange.Rows.Count
+        $NewCount = 0
+
+        for ($r = 2; $r -le $MaxRow; $r++) {
+            $TypeVal = $Sheet.Cells.Item($r, $Config.ExcelTypeColumn).Text
+            if ($TypeVal -eq "H") {
+                $RefVal = $Sheet.Cells.Item($r, $Config.ExcelReferenceColumn).Text.Trim()
+                $TypeCell = $Sheet.Cells.Item($r, $Config.ExcelTypeColumn)
+                
+                if ($AllBaseRefs.Contains($RefVal)) {
+                    # Trouvée dans la base : enlever la couleur
+                    $TypeCell.Interior.ColorIndex = -4142  # xlNone
+                } else {
+                    # Nouvelle : colorer en rouge
+                    $TypeCell.Interior.Color = 255
+                    $TypeCell.Interior.Pattern = 1  # xlSolid
+                    $NewCount++
+                }
+            }
+        }
+
+        $Workbook.Save()
+        $LabelResult.Text = "Ref. nouvelles : $NewCount"
+        [System.Windows.Forms.MessageBox]::Show("Traitement termine. $NewCount reference(s) nouvelle(s) identifiee(s) et coloriee(s) en rouge.", "Info", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+    }
+    catch {
+        [System.Windows.Forms.MessageBox]::Show("Erreur : $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+    finally {
+        if ($Workbook) { $Workbook.Close($true) }
+        if ($Excel) { $Excel.Quit() }
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Sheet) 2>$null | Out-Null
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Workbook) 2>$null | Out-Null
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Excel) 2>$null | Out-Null
+        [GC]::Collect()
+    }
+}
+
 function Read-ExcelHReferences {
-    param([string]$ExcelPath)
+    param(
+        [string]$ExcelPath,
+        [int]$TypeColumn = 3,
+        [int]$ReferenceColumn = 14
+    )
     $Refs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     try {
         $Excel = New-Object -ComObject Excel.Application
@@ -54,9 +125,9 @@ function Read-ExcelHReferences {
         $UsedRange = $Sheet.UsedRange
         $MaxRow = $UsedRange.Rows.Count
         for ($r = 2; $r -le $MaxRow; $r++) {
-            $TypeVal = $Sheet.Cells.Item($r, 3).Text
+            $TypeVal = $Sheet.Cells.Item($r, $TypeColumn).Text
             if ($TypeVal -eq "H") {
-                $RefVal = $Sheet.Cells.Item($r, 14).Text
+                $RefVal = $Sheet.Cells.Item($r, $ReferenceColumn).Text
                 if ($RefVal) {
                     [void]$Refs.Add($RefVal.Trim())
                 }
@@ -87,7 +158,7 @@ function Start-Comparison {
     }
     $Grid.Rows.Clear()
     try {
-        $ExcelRefs = Read-ExcelHReferences -ExcelPath $ExcelPath
+        $ExcelRefs = Read-ExcelHReferences -ExcelPath $ExcelPath -TypeColumn $Config.ExcelTypeColumn -ReferenceColumn $Config.ExcelReferenceColumn
         $ExcelTotal = $ExcelRefs.Count
         if ($ExcelTotal -eq 0) {
             [System.Windows.Forms.MessageBox]::Show("Aucune reference de type H trouvee dans le fichier Excel.", "Info", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
@@ -101,7 +172,7 @@ function Start-Comparison {
             $MarketRefs = Get-MarketHReferences -SearchIndex $Index -Affaire $Affaire
             $MarketTotal = $MarketRefs.Count
             if ($MarketTotal -eq 0) {
-                $Grid.Rows.Add($Affaire, "0/0", "0/$ExcelTotal") | Out-Null
+                $Grid.Rows.Add($Affaire, "0% (0/0)", "0% (0/$ExcelTotal)") | Out-Null
                 continue
             }
             $MarketSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -116,8 +187,12 @@ function Start-Comparison {
                 if ($MarketSet.Contains($e)) { $ExcelFoundInMarket++ }
             }
 
-            $Col2 = "$MarketFoundInExcel/$MarketTotal"
-            $Col3 = "$ExcelFoundInMarket/$ExcelTotal"
+            # Col2 : (refs du marché trouvées dans Excel) / (total refs H dans le marché)
+            $PercentageMarketInExcel = if ($MarketTotal -gt 0) { [math]::Round(($MarketFoundInExcel / $MarketTotal) * 100) } else { 0 }
+            # Col3 : (refs Excel trouvées dans le marché) / (total refs H dans Excel)
+            $PercentageExcelInMarket = if ($ExcelTotal -gt 0) { [math]::Round(($ExcelFoundInMarket / $ExcelTotal) * 100) } else { 0 }
+            $Col2 = "$PercentageMarketInExcel% ($MarketFoundInExcel/$MarketTotal)"
+            $Col3 = "$PercentageExcelInMarket% ($ExcelFoundInMarket/$ExcelTotal)"
             $Grid.Rows.Add($Affaire, $Col2, $Col3) | Out-Null
         }
     }
@@ -174,8 +249,27 @@ $ButtonInit.Size = New-Object System.Drawing.Size(80, 30)
 $ButtonInit.Add_Click({
     $TextBoxPath.Text = ""
     $DataGrid.Rows.Clear()
+    $LabelNewCount.Text = "Ref. nouvelles : -"
 })
 $Form.Controls.Add($ButtonInit)
+
+$ButtonNovelty = New-Object System.Windows.Forms.Button
+$ButtonNovelty.Text = "Taux news"
+$ButtonNovelty.Location = New-Object System.Drawing.Point(180, 75)
+$ButtonNovelty.Size = New-Object System.Drawing.Size(120, 30)
+$ButtonNovelty.BackColor = [System.Drawing.Color]::LightCyan
+$ButtonNovelty.Add_Click({
+    Mark-NewReferencesInExcel -ExcelPath $TextBoxPath.Text.Trim() -Index $SearchIndex -Config $Config -LabelResult $LabelNewCount
+})
+$Form.Controls.Add($ButtonNovelty)
+
+$LabelNewCount = New-Object System.Windows.Forms.Label
+$LabelNewCount.Text = "Ref. nouvelles : -"
+$LabelNewCount.Location = New-Object System.Drawing.Point(310, 80)
+$LabelNewCount.Size = New-Object System.Drawing.Size(300, 20)
+$LabelNewCount.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+$LabelNewCount.ForeColor = [System.Drawing.Color]::Red
+$Form.Controls.Add($LabelNewCount)
 
 $DataGrid = New-Object System.Windows.Forms.DataGridView
 $DataGrid.Location = New-Object System.Drawing.Point(10, 115)
@@ -183,9 +277,9 @@ $DataGrid.Size = New-Object System.Drawing.Size(660, 280)
 $DataGrid.ReadOnly = $true
 $DataGrid.AutoSizeColumnsMode = [System.Windows.Forms.DataGridViewAutoSizeColumnsMode]::Fill
 $DataGrid.ColumnCount = 3
-$DataGrid.Columns[0].Name = "Affaire"
-$DataGrid.Columns[1].Name = "Base trouvee dans Excel"
-$DataGrid.Columns[2].Name = "Excel trouve dans Base"
+$DataGrid.Columns[0].Name = "March" + [char]233
+$DataGrid.Columns[1].Name = "Excel / March" + [char]233
+$DataGrid.Columns[2].Name = "March" + [char]233 + " / Excel"
 $Form.Controls.Add($DataGrid)
 $Form.Add_Shown({ $Form.Activate() })
 [void]$Form.ShowDialog()
