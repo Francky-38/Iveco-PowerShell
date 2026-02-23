@@ -2,7 +2,7 @@
 
 # Variables globales
 $Global:ProjectName = "MY-Project-PowerShell"
-$Global:ProjectVersion = "9.0.1"
+$Global:ProjectVersion = "11.1.0"
 $Global:ProjectAuthor = "Franck Ginhoux"
 
 # Paramètres
@@ -47,8 +47,8 @@ $Config.BaseName = "Locale" #"Globale" #"locale"
 $Config.FormBackColor = "Honeydew" #"WhiteSmoke"  #"Honeydew"
 
 # Parametres pour la comparaison des references Excel
-$Config.ExcelTypeColumn = 3           # Colonne Excel contenant le type de reference (S ou H)
-$Config.ExcelReferenceColumn = 14     # Colonne Excel contenant la reference
+$Config.ExcelTypeColumn = 4           # Colonne Excel contenant le type de reference (S ou H)
+$Config.ExcelReferenceColumn = 12     # Colonne Excel contenant la reference
 
 # Export des paramètres
 $Config

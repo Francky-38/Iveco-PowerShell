@@ -150,7 +150,9 @@ function Start-Comparison {
     param(
         [string]$ExcelPath,
         [System.Windows.Forms.DataGridView]$Grid,
-        $Index
+        $Index,
+        [string[]]$SelectedMarkets,
+        $Config
     )
     if (-not $ExcelPath -or -not (Test-Path $ExcelPath)) {
         [System.Windows.Forms.MessageBox]::Show("Chemin Excel invalide ou fichier inexistant.", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
@@ -167,7 +169,7 @@ function Start-Comparison {
         $ExcelSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($r in $ExcelRefs) { [void]$ExcelSet.Add($r) }
 
-        $Affaires = @($Index.AffaireIndex.Keys | Select-Object -First 20)
+        $Affaires = @($SelectedMarkets)
         foreach ($Affaire in $Affaires) {
             $MarketRefs = Get-MarketHReferences -SearchIndex $Index -Affaire $Affaire
             $MarketTotal = $MarketRefs.Count
@@ -204,23 +206,133 @@ function Start-Comparison {
 # Interface
 $Form = New-Object System.Windows.Forms.Form
 $Form.Text = "Comparaison references H - Excel vs Base"
-$Form.Size = New-Object System.Drawing.Size(700, 450)
+$Form.Size = New-Object System.Drawing.Size(700, 520)
 $Form.StartPosition = "CenterScreen"
 
+# Ajouter l'icône à la Form
+$IconPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath "nono bleu.ico"
+if (Test-Path -Path $IconPath) {
+    $Form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($IconPath)
+}
+
+$LabelMarkets = New-Object System.Windows.Forms.Label
+$LabelMarkets.Text = "Selectionner les march" + [char]233 + "s :"
+$LabelMarkets.Location = New-Object System.Drawing.Point(10, 15)
+$LabelMarkets.Size = New-Object System.Drawing.Size(200, 20)
+$Form.Controls.Add($LabelMarkets)
+
+$ButtonSelectGX = New-Object System.Windows.Forms.Button
+$ButtonSelectGX.Text = "GX"
+$ButtonSelectGX.Location = New-Object System.Drawing.Point(10, 38)
+$ButtonSelectGX.Size = New-Object System.Drawing.Size(50, 25)
+$ButtonSelectGX.Add_Click({
+    $GridMarkets.Rows.Clear()
+    foreach ($Affaire in $script:AllAffaires | Where-Object { $_ -like "*GX*" }) {
+        $Numero = ""
+        if ($Affaire -match '(20\d{8})') {
+            $Numero = $Matches[1]
+        }
+        [void]$GridMarkets.Rows.Add($Affaire, $Numero)
+    }
+})
+$Form.Controls.Add($ButtonSelectGX)
+
+$ButtonSelectOther = New-Object System.Windows.Forms.Button
+$ButtonSelectOther.Text = "Autres"
+$ButtonSelectOther.Location = New-Object System.Drawing.Point(65, 38)
+$ButtonSelectOther.Size = New-Object System.Drawing.Size(50, 25)
+$ButtonSelectOther.Add_Click({
+    $GridMarkets.Rows.Clear()
+    foreach ($Affaire in $script:AllAffaires | Where-Object { $_ -notlike "*GX*" }) {
+        $Numero = ""
+        if ($Affaire -match '(20\d{8})') {
+            $Numero = $Matches[1]
+        }
+        [void]$GridMarkets.Rows.Add($Affaire, $Numero)
+    }
+})
+$Form.Controls.Add($ButtonSelectOther)
+
+$ButtonSelectAll = New-Object System.Windows.Forms.Button
+$ButtonSelectAll.Text = "Tous"
+$ButtonSelectAll.Location = New-Object System.Drawing.Point(120, 38)
+$ButtonSelectAll.Size = New-Object System.Drawing.Size(50, 25)
+$ButtonSelectAll.Add_Click({
+    $GridMarkets.Rows.Clear()
+    foreach ($Affaire in $script:AllAffaires) {
+        $Numero = ""
+        if ($Affaire -match '(20\d{8})') {
+            $Numero = $Matches[1]
+        }
+        [void]$GridMarkets.Rows.Add($Affaire, $Numero)
+    }
+})
+$Form.Controls.Add($ButtonSelectAll)
+
+$ButtonRemove = New-Object System.Windows.Forms.Button
+$ButtonRemove.Text = "Sup. sel."
+$ButtonRemove.Location = New-Object System.Drawing.Point(340, 38)
+$ButtonRemove.Size = New-Object System.Drawing.Size(70, 25)
+$ButtonRemove.Add_Click({
+    # Supprimer en ordre inverse pour éviter les problèmes d'index
+    for ($i = $GridMarkets.Rows.Count - 1; $i -ge 0; $i--) {
+        if ($GridMarkets.Rows[$i].Selected) {
+            $GridMarkets.Rows.RemoveAt($i)
+        }
+    }
+})
+$Form.Controls.Add($ButtonRemove)
+
+$GridMarkets = New-Object System.Windows.Forms.DataGridView
+$GridMarkets.Location = New-Object System.Drawing.Point(10, 68)
+$GridMarkets.Size = New-Object System.Drawing.Size(400, 180)
+$GridMarkets.SelectionMode = [System.Windows.Forms.DataGridViewSelectionMode]::FullRowSelect
+$GridMarkets.MultiSelect = $true
+$GridMarkets.AllowUserToAddRows = $false
+$GridMarkets.AllowUserToDeleteRows = $false
+$GridMarkets.AllowUserToResizeRows = $false
+$GridMarkets.ColumnHeadersHeightSizeMode = [System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode]::AutoSize
+$GridMarkets.AutoSizeColumnsMode = [System.Windows.Forms.DataGridViewAutoSizeColumnsMode]::None
+
+# Créer les colonnes
+$ColName = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+$ColName.Name = "Marche"
+$ColName.HeaderText = "March" + [char]233
+$ColName.Width = 287
+$GridMarkets.Columns.Add($ColName) | Out-Null
+
+$ColNum = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+$ColNum.Name = "Numero"
+$ColNum.HeaderText = "Num" + [char]233 + "ro"
+$ColNum.Width = 70
+$GridMarkets.Columns.Add($ColNum) | Out-Null
+
+# Remplir avec tous les marchés de la base
+$script:AllAffaires = @($SearchIndex.AffaireIndex.Keys | Sort-Object)
+foreach ($Affaire in $script:AllAffaires) {
+    # Extraire le numéro (10 chiffres commençant par 20)
+    $Numero = ""
+    if ($Affaire -match '(20\d{8})') {
+        $Numero = $Matches[1]
+    }
+    [void]$GridMarkets.Rows.Add($Affaire, $Numero)
+}
+$Form.Controls.Add($GridMarkets)
+
 $LabelPath = New-Object System.Windows.Forms.Label
-$LabelPath.Text = "Fichier Excel (chemin complet) :"
-$LabelPath.Location = New-Object System.Drawing.Point(10, 15)
+$LabelPath.Text = "Selectionner l'export Excel :"
+$LabelPath.Location = New-Object System.Drawing.Point(430, 15)
 $LabelPath.Size = New-Object System.Drawing.Size(200, 20)
 $Form.Controls.Add($LabelPath)
 
 $TextBoxPath = New-Object System.Windows.Forms.TextBox
-$TextBoxPath.Location = New-Object System.Drawing.Point(10, 40)
-$TextBoxPath.Size = New-Object System.Drawing.Size(540, 25)
+$TextBoxPath.Location = New-Object System.Drawing.Point(430, 40)
+$TextBoxPath.Size = New-Object System.Drawing.Size(200, 25)
 $Form.Controls.Add($TextBoxPath)
 
 $ButtonBrowse = New-Object System.Windows.Forms.Button
 $ButtonBrowse.Text = "..."
-$ButtonBrowse.Location = New-Object System.Drawing.Point(555, 38)
+$ButtonBrowse.Location = New-Object System.Drawing.Point(635, 38)
 $ButtonBrowse.Size = New-Object System.Drawing.Size(35, 25)
 $ButtonBrowse.Add_Click({
     $Dlg = New-Object System.Windows.Forms.OpenFileDialog
@@ -234,17 +346,25 @@ $Form.Controls.Add($ButtonBrowse)
 
 $ButtonRun = New-Object System.Windows.Forms.Button
 $ButtonRun.Text = "Lancer"
-$ButtonRun.Location = New-Object System.Drawing.Point(10, 75)
+$ButtonRun.Location = New-Object System.Drawing.Point(430, 70)
 $ButtonRun.Size = New-Object System.Drawing.Size(80, 30)
 $ButtonRun.BackColor = [System.Drawing.Color]::LightGreen
 $ButtonRun.Add_Click({
-    Start-Comparison -ExcelPath $TextBoxPath.Text.Trim() -Grid $DataGrid -Index $SearchIndex
+    $SelectedMarkets = @()
+    foreach ($Row in $GridMarkets.SelectedRows) {
+        $SelectedMarkets += $Row.Cells["Marche"].Value
+    }
+    if ($SelectedMarkets.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("Veuillez selectionner au moins un march" + [char]233 + ".", "Avertissement", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        return
+    }
+    Start-Comparison -ExcelPath $TextBoxPath.Text.Trim() -Grid $DataGrid -Index $SearchIndex -SelectedMarkets $SelectedMarkets -Config $Config
 })
 $Form.Controls.Add($ButtonRun)
 
 $ButtonInit = New-Object System.Windows.Forms.Button
 $ButtonInit.Text = "Initialiser"
-$ButtonInit.Location = New-Object System.Drawing.Point(95, 75)
+$ButtonInit.Location = New-Object System.Drawing.Point(515, 70)
 $ButtonInit.Size = New-Object System.Drawing.Size(80, 30)
 $ButtonInit.Add_Click({
     $TextBoxPath.Text = ""
@@ -255,8 +375,8 @@ $Form.Controls.Add($ButtonInit)
 
 $ButtonNovelty = New-Object System.Windows.Forms.Button
 $ButtonNovelty.Text = "Taux news"
-$ButtonNovelty.Location = New-Object System.Drawing.Point(180, 75)
-$ButtonNovelty.Size = New-Object System.Drawing.Size(120, 30)
+$ButtonNovelty.Location = New-Object System.Drawing.Point(600, 70)
+$ButtonNovelty.Size = New-Object System.Drawing.Size(70, 30)
 $ButtonNovelty.BackColor = [System.Drawing.Color]::LightCyan
 $ButtonNovelty.Add_Click({
     Mark-NewReferencesInExcel -ExcelPath $TextBoxPath.Text.Trim() -Index $SearchIndex -Config $Config -LabelResult $LabelNewCount
@@ -265,15 +385,15 @@ $Form.Controls.Add($ButtonNovelty)
 
 $LabelNewCount = New-Object System.Windows.Forms.Label
 $LabelNewCount.Text = "Ref. nouvelles : -"
-$LabelNewCount.Location = New-Object System.Drawing.Point(310, 80)
+$LabelNewCount.Location = New-Object System.Drawing.Point(430, 110)
 $LabelNewCount.Size = New-Object System.Drawing.Size(300, 20)
 $LabelNewCount.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
 $LabelNewCount.ForeColor = [System.Drawing.Color]::Red
 $Form.Controls.Add($LabelNewCount)
 
 $DataGrid = New-Object System.Windows.Forms.DataGridView
-$DataGrid.Location = New-Object System.Drawing.Point(10, 115)
-$DataGrid.Size = New-Object System.Drawing.Size(660, 280)
+$DataGrid.Location = New-Object System.Drawing.Point(10, 255)
+$DataGrid.Size = New-Object System.Drawing.Size(660, 215)
 $DataGrid.ReadOnly = $true
 $DataGrid.AutoSizeColumnsMode = [System.Windows.Forms.DataGridViewAutoSizeColumnsMode]::Fill
 $DataGrid.ColumnCount = 3
