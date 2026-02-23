@@ -317,6 +317,8 @@ foreach ($Affaire in $script:AllAffaires) {
     }
     [void]$GridMarkets.Rows.Add($Affaire, $Numero)
 }
+# Trier par Numero en ordre décroissant
+$GridMarkets.Sort($GridMarkets.Columns["Numero"], [System.ComponentModel.ListSortDirection]::Descending)
 $Form.Controls.Add($GridMarkets)
 
 $LabelPath = New-Object System.Windows.Forms.Label
