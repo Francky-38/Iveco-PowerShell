@@ -274,11 +274,19 @@ $ButtonRemove.Text = "Sup. sel."
 $ButtonRemove.Location = New-Object System.Drawing.Point(340, 38)
 $ButtonRemove.Size = New-Object System.Drawing.Size(70, 25)
 $ButtonRemove.Add_Click({
-    # Supprimer en ordre inverse pour éviter les problèmes d'index
-    for ($i = $GridMarkets.Rows.Count - 1; $i -ge 0; $i--) {
+    # Collecter d'abord les indices à supprimer
+    $IndicesToRemove = @()
+    for ($i = 0; $i -lt $GridMarkets.Rows.Count; $i++) {
         if ($GridMarkets.Rows[$i].Selected) {
-            $GridMarkets.Rows.RemoveAt($i)
+            $MarcheValue = $GridMarkets.Rows[$i].Cells["Marche"].Value
+            if ($MarcheValue -and -not [string]::IsNullOrEmpty($MarcheValue.ToString())) {
+                $IndicesToRemove += $i
+            }
         }
+    }
+    # Supprimer en ordre inverse
+    for ($i = $IndicesToRemove.Count - 1; $i -ge 0; $i--) {
+        $GridMarkets.Rows.RemoveAt($IndicesToRemove[$i])
     }
 })
 $Form.Controls.Add($ButtonRemove)
@@ -312,7 +320,7 @@ $script:AllAffaires = @($SearchIndex.AffaireIndex.Keys | Sort-Object)
 foreach ($Affaire in $script:AllAffaires) {
     # Extraire le numéro (10 chiffres commençant par 20)
     $Numero = ""
-    if ($Affaire -match '(20\d{8})') {
+    if ($Affaire -match '(20\d{7})') {
         $Numero = $Matches[1]
     }
     [void]$GridMarkets.Rows.Add($Affaire, $Numero)

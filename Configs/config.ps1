@@ -2,7 +2,7 @@
 
 # Variables globales
 $Global:ProjectName = "MY-Project-PowerShell"
-$Global:ProjectVersion = "11.1.0"
+$Global:ProjectVersion = "11.1.2"
 $Global:ProjectAuthor = "Franck Ginhoux"
 
 # Paramètres
