@@ -1380,3 +1380,474 @@ function New-CompiledPresentation {
         [GC]::WaitForPendingFinalizers()
     }
 }
+
+<#
+.SYNOPSIS
+    Interface graphique de recherche de texte a la volee dans les PPTX
+
+.DESCRIPTION
+    Affiche une interface WinForms qui recherche un texte saisi par l'utilisateur
+    directement dans le contenu des fichiers PPTX de l'arborescence (memes fichiers
+    et meme configuration que ExtracRefServeur.ps1). Aucune base n'est generee :
+    les fichiers sont parcourus a la volee et les resultats sont ajoutes a la liste
+    au fur et a mesure de leur decouverte.
+
+.EXAMPLE
+    Show-LiveTextSearchGui
+#>
+function Show-LiveTextSearchGui {
+    param(
+        [string]$RootPath = "",
+        [array]$SubPathStructures = @()
+    )
+
+    # Charger la configuration
+    $ConfigPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath "Configs\config.ps1"
+    if (Test-Path -Path $ConfigPath) {
+        . $ConfigPath
+    }
+
+    # Charger les assemblies
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    # Utiliser les valeurs de config si les parametres ne sont pas fournis
+    if ([string]::IsNullOrEmpty($RootPath)) {
+        $RootPath = $Config.ExtractionRootPath
+    }
+    if ($null -eq $SubPathStructures -or $SubPathStructures.Count -eq 0) {
+        $SubPathStructures = $Config.SubPathStructures
+    }
+    if ($null -eq $SubPathStructures -or $SubPathStructures.Count -eq 0) {
+        $SubPathStructures = @("")
+    }
+
+    if (-not (Test-Path -Path $RootPath)) {
+        [System.Windows.Forms.MessageBox]::Show("Erreur: Le chemin racine '$RootPath' n'existe pas", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        return
+    }
+
+    # Etat partage entre les gestionnaires d'evenements
+    $State = @{ Cancel = $false; Running = $false }
+
+    # Creer la fenetre principale
+    $Version = Get-ProjectVersion
+    $Form = New-Object System.Windows.Forms.Form
+    $Form.Text = "Recherche de texte a la vol" + [char]233 + "e - V$Version"
+    $Form.Size = New-Object System.Drawing.Size(1220, 600)
+    $Form.StartPosition = "CenterScreen"
+    $Form.BackColor = [System.Drawing.Color]::($Config.FormBackColor)
+
+    # Ajouter l'icone a la Form
+    $IconPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath "nono bleu.ico"
+    if (Test-Path -Path $IconPath) {
+        $Form.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($IconPath)
+    }
+
+    # Panel superieur (recherche)
+    $SearchPanel = New-Object System.Windows.Forms.Panel
+    $SearchPanel.Location = New-Object System.Drawing.Point(10, 10)
+    $SearchPanel.Size = New-Object System.Drawing.Size(1180, 60)
+    $SearchPanel.BackColor = [System.Drawing.Color]::White
+    $SearchPanel.BorderStyle = "Fixed3D"
+
+    $ToolTip = New-Object System.Windows.Forms.ToolTip
+    $ToolTip.SetToolTip($SearchPanel, "D" + [char]233 + "velopp" + [char]233 + " par : Franck Ginhoux")
+
+    # Label pour le texte recherche
+    $Label = New-Object System.Windows.Forms.Label
+    $Label.Text = "Texte :"
+    $Label.Location = New-Object System.Drawing.Point(10, 15)
+    $Label.Size = New-Object System.Drawing.Size(60, 20)
+    $Label.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+
+    # TextBox pour le texte recherche
+    $TextBox = New-Object System.Windows.Forms.TextBox
+    $TextBox.Location = New-Object System.Drawing.Point(75, 15)
+    $TextBox.Size = New-Object System.Drawing.Size(420, 25)
+    $TextBox.Font = New-Object System.Drawing.Font("Arial", 10)
+
+    # Label pour Crit. Marche
+    $LabelMarket = New-Object System.Windows.Forms.Label
+    $LabelMarket.Text = "Crit. March" + [char]233 + ":"
+    $LabelMarket.Location = New-Object System.Drawing.Point(510, 15)
+    $LabelMarket.Size = New-Object System.Drawing.Size(95, 20)
+    $LabelMarket.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+
+    $ToolTipMarket = New-Object System.Windows.Forms.ToolTip
+    $ToolTipMarket.SetToolTip($LabelMarket, "_ pour exclure le crit" + [char]232 + "re")
+
+    # TextBox pour Crit. Marche
+    $TextBoxMarket = New-Object System.Windows.Forms.TextBox
+    $TextBoxMarket.Location = New-Object System.Drawing.Point(605, 15)
+    $TextBoxMarket.Size = New-Object System.Drawing.Size(120, 25)
+    $TextBoxMarket.Font = New-Object System.Drawing.Font("Arial", 10)
+
+    # Bouton Rechercher
+    $SearchButton = New-Object System.Windows.Forms.Button
+    $SearchButton.Text = "Rechercher"
+    $SearchButton.Location = New-Object System.Drawing.Point(740, 10)
+    $SearchButton.Size = New-Object System.Drawing.Size(100, 30)
+    $SearchButton.BackColor = [System.Drawing.Color]::LightBlue
+    $SearchButton.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+    $SearchButton.FlatStyle = "Flat"
+
+    # Bouton Arreter
+    $StopButton = New-Object System.Windows.Forms.Button
+    $StopButton.Text = "Arr" + [char]234 + "ter"
+    $StopButton.Location = New-Object System.Drawing.Point(850, 10)
+    $StopButton.Size = New-Object System.Drawing.Size(90, 30)
+    $StopButton.BackColor = [System.Drawing.Color]::LightSalmon
+    $StopButton.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+    $StopButton.FlatStyle = "Flat"
+    $StopButton.Enabled = $false
+
+    # Bouton Reinitialiser
+    $ClearButton = New-Object System.Windows.Forms.Button
+    $ClearButton.Text = "R" + [char]233 + "initialiser"
+    $ClearButton.Location = New-Object System.Drawing.Point(950, 10)
+    $ClearButton.Size = New-Object System.Drawing.Size(100, 30)
+    $ClearButton.BackColor = [System.Drawing.Color]::LightGray
+    $ClearButton.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+    $ClearButton.FlatStyle = "Flat"
+
+    # Label info base
+    $BaseInfoLabel = New-Object System.Windows.Forms.Label
+    $BaseInfoLabel.Text = "Serveur (live)"
+    $BaseInfoLabel.Location = New-Object System.Drawing.Point(1060, 10)
+    $BaseInfoLabel.Size = New-Object System.Drawing.Size(110, 30)
+    $BaseInfoLabel.Font = New-Object System.Drawing.Font("Arial", 11, [System.Drawing.FontStyle]::Italic)
+    $BaseInfoLabel.TextAlign = "MiddleRight"
+    $BaseInfoLabel.ForeColor = [System.Drawing.Color]::DarkGray
+
+    $SearchPanel.Controls.Add($Label)
+    $SearchPanel.Controls.Add($TextBox)
+    $SearchPanel.Controls.Add($LabelMarket)
+    $SearchPanel.Controls.Add($TextBoxMarket)
+    $SearchPanel.Controls.Add($SearchButton)
+    $SearchPanel.Controls.Add($StopButton)
+    $SearchPanel.Controls.Add($ClearButton)
+    $SearchPanel.Controls.Add($BaseInfoLabel)
+
+    # DataGridView pour les resultats
+    $DataGridView = New-Object System.Windows.Forms.DataGridView
+    $DataGridView.Location = New-Object System.Drawing.Point(10, 80)
+    $DataGridView.Size = New-Object System.Drawing.Size(1180, 430)
+    $DataGridView.AllowUserToAddRows = $false
+    $DataGridView.AllowUserToDeleteRows = $false
+    $DataGridView.ReadOnly = $true
+    $DataGridView.SelectionMode = "FullRowSelect"
+    $DataGridView.BackgroundColor = [System.Drawing.Color]::White
+    $DataGridView.GridColor = [System.Drawing.Color]::LightGray
+    $DataGridView.Font = New-Object System.Drawing.Font("Arial", 9)
+
+    $DataGridView.ColumnCount = 7
+    $DataGridView.Columns[0].Name = "March" + [char]233
+    $DataGridView.Columns[0].Width = 250
+    $DataGridView.Columns[1].Name = "Poste"
+    $DataGridView.Columns[1].Width = 200
+    $DataGridView.Columns[2].Name = "SOP"
+    $DataGridView.Columns[2].Width = 220
+    $DataGridView.Columns[3].Name = "Page"
+    $DataGridView.Columns[3].Width = 50
+    $DataGridView.Columns[4].Name = "Date"
+    $DataGridView.Columns[4].Width = 130
+    $DataGridView.Columns[5].Name = "Extrait"
+    $DataGridView.Columns[5].Width = 320
+    $DataGridView.Columns[6].Name = "PathPptx"
+    $DataGridView.Columns[6].Visible = $false
+
+    $DataGridView.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::DarkBlue
+    $DataGridView.ColumnHeadersDefaultCellStyle.ForeColor = [System.Drawing.Color]::White
+    $DataGridView.ColumnHeadersDefaultCellStyle.Font = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Bold)
+
+    # Label de statut (progression)
+    $StatusLabel = New-Object System.Windows.Forms.Label
+    $StatusLabel.Location = New-Object System.Drawing.Point(10, 520)
+    $StatusLabel.Size = New-Object System.Drawing.Size(1180, 30)
+    $StatusLabel.Font = New-Object System.Drawing.Font("Arial", 9)
+    $StatusLabel.TextAlign = "MiddleLeft"
+    $StatusLabel.Text = "Pr" + [char]234 + "t."
+
+    # Fonction interne : extraire le texte de chaque slide d'un PPTX
+    $GetSlidesText = {
+        param([string]$PptxPath)
+
+        $Result = @()
+        $ZipArchive = $null
+        try {
+            $ZipArchive = [System.IO.Compression.ZipFile]::OpenRead($PptxPath)
+            $SlidesEntries = $ZipArchive.Entries | Where-Object { $_.FullName -like "ppt/slides/slide*.xml" }
+            foreach ($SlideEntry in $SlidesEntries) {
+                try {
+                    $Stream = $SlideEntry.Open()
+                    $XmlContent = [System.Xml.XmlDocument]::new()
+                    $XmlContent.Load($Stream)
+                    $Stream.Close()
+
+                    $NamespaceManager = New-Object System.Xml.XmlNamespaceManager($XmlContent.NameTable)
+                    $NamespaceManager.AddNamespace("a", "http://schemas.openxmlformats.org/drawingml/2006/main")
+                    $TextNodes = $XmlContent.SelectNodes("//a:t", $NamespaceManager)
+
+                    $Builder = New-Object System.Text.StringBuilder
+                    foreach ($TextNode in $TextNodes) {
+                        [void]$Builder.Append($TextNode.InnerText)
+                        [void]$Builder.Append(" ")
+                    }
+
+                    $PageNumber = if ($SlideEntry.Name -match 'slide(\d+)') { [int]$Matches[1] } else { 0 }
+                    $Result += [PSCustomObject]@{
+                        PageNumber = $PageNumber
+                        Text = $Builder.ToString()
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        finally {
+            if ($ZipArchive) { $ZipArchive.Dispose() }
+        }
+        return $Result
+    }
+
+    # Evenement du bouton Rechercher
+    $SearchButton.Add_Click({
+        if ($State.Running) { return }
+
+        $SearchInput = $TextBox.Text.Trim()
+        if ([string]::IsNullOrEmpty($SearchInput)) {
+            [System.Windows.Forms.MessageBox]::Show("Veuillez entrer un texte a rechercher", "Attention", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+            return
+        }
+
+        # Critere marche (filtre sur le nom de l'affaire)
+        $MarketCriteria = $TextBoxMarket.Text.Trim()
+        $IsNegativeMarketFilter = $false
+        $MarketFilterValue = ""
+        if (-not [string]::IsNullOrEmpty($MarketCriteria)) {
+            if ($MarketCriteria.StartsWith("_")) {
+                $IsNegativeMarketFilter = $true
+                $MarketFilterValue = $MarketCriteria.Substring(1)
+            } else {
+                $MarketFilterValue = $MarketCriteria
+            }
+        }
+
+        # Preparer l'UI pour la recherche
+        $State.Cancel = $false
+        $State.Running = $true
+        $SearchButton.Enabled = $false
+        $StopButton.Enabled = $true
+        $ClearButton.Enabled = $false
+        $DataGridView.Rows.Clear()
+        $FoundCount = 0
+        $FilesScanned = 0
+        $SearchStartTime = Get-Date
+
+        try {
+            # Etape 1 : dossiers Affaires (terminant par SA ou SB)
+            $AffairesFolders = @(Get-ChildItem -Path $RootPath -Directory -ErrorAction SilentlyContinue |
+                               Where-Object { $_.Name -match '(SA|SB)$' })
+
+            if ($AffairesFolders.Count -eq 0) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Aucun dossier Affaire (SA/SB) trouve dans :`n$RootPath",
+                    "Attention",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+            }
+
+            foreach ($AffaireFolder in $AffairesFolders) {
+                if ($State.Cancel) { break }
+
+                # Filtre marche sur le nom de l'affaire
+                if (-not [string]::IsNullOrEmpty($MarketFilterValue)) {
+                    if ($IsNegativeMarketFilter) {
+                        if ($AffaireFolder.Name -like "*$MarketFilterValue*") { continue }
+                    } else {
+                        if (-not ($AffaireFolder.Name -like "*$MarketFilterValue*")) { continue }
+                    }
+                }
+
+                foreach ($SubPath in $SubPathStructures) {
+                    if ($State.Cancel) { break }
+
+                    $PostesPath = if ([string]::IsNullOrEmpty($SubPath)) {
+                        $AffaireFolder.FullName
+                    } else {
+                        Join-Path -Path $AffaireFolder.FullName -ChildPath $SubPath
+                    }
+                    if (-not (Test-Path -Path $PostesPath)) { continue }
+
+                    $PostesFolders = Get-ChildItem -Path $PostesPath -Directory -ErrorAction SilentlyContinue
+                    foreach ($PosteFolder in $PostesFolders) {
+                        if ($State.Cancel) { break }
+
+                        $FilesInPoste = Get-ChildItem -Path $PosteFolder.FullName -Filter "*.pptx" -ErrorAction SilentlyContinue
+                        foreach ($PptxFile in $FilesInPoste) {
+                            if ($State.Cancel) { break }
+
+                            $FilesScanned++
+                            $StatusLabel.Text = "Analyse : $($PptxFile.Name)  |  Fichiers scrut" + [char]233 + "s : $FilesScanned  |  R" + [char]233 + "sultats : $FoundCount"
+
+                            $DateMod = $PptxFile.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+
+                            $Slides = & $GetSlidesText -PptxPath $PptxFile.FullName
+                            foreach ($Slide in $Slides) {
+                                if ($State.Cancel) { break }
+
+                                $idx = $Slide.Text.IndexOf($SearchInput, [System.StringComparison]::OrdinalIgnoreCase)
+                                if ($idx -ge 0) {
+                                    # Construire un extrait autour de la correspondance
+                                    $Start = [Math]::Max(0, $idx - 30)
+                                    $Len = [Math]::Min($Slide.Text.Length - $Start, $SearchInput.Length + 60)
+                                    $Snippet = $Slide.Text.Substring($Start, $Len).Trim() -replace '\s+', ' '
+                                    if ($Start -gt 0) { $Snippet = "..." + $Snippet }
+
+                                    $DataGridView.Rows.Add(
+                                        $AffaireFolder.Name,
+                                        $PosteFolder.Name,
+                                        $PptxFile.Name,
+                                        $Slide.PageNumber,
+                                        $DateMod,
+                                        $Snippet,
+                                        $PptxFile.FullName
+                                    ) | Out-Null
+                                    $FoundCount++
+                                }
+                            }
+
+                            # Rafraichir l'interface au fur et a mesure (resultats a la volee)
+                            [System.Windows.Forms.Application]::DoEvents()
+                        }
+                    }
+                }
+            }
+        }
+        finally {
+            # Trier par date decroissante (plus recentes en haut)
+            if ($DataGridView.Rows.Count -gt 0) {
+                $DataGridView.Sort($DataGridView.Columns["Date"], [System.ComponentModel.ListSortDirection]::Descending)
+            }
+
+            $State.Running = $false
+            $SearchButton.Enabled = $true
+            $StopButton.Enabled = $false
+            $ClearButton.Enabled = $true
+
+            $SearchDuration = (Get-Date) - $SearchStartTime
+            $EndMsg = if ($State.Cancel) { "Recherche interrompue" } else { "Recherche termin" + [char]233 + "e" }
+            $StatusLabel.Text = "$EndMsg  |  Fichiers scrut" + [char]233 + "s : $FilesScanned  |  R" + [char]233 + "sultats : $FoundCount  |  Dur" + [char]233 + "e : $([math]::Round($SearchDuration.TotalSeconds, 1))s"
+            $Form.Text = "Recherche de texte a la vol" + [char]233 + "e [$FoundCount resultat(s)] - V$Version"
+        }
+    })
+
+    # Evenement du bouton Arreter
+    $StopButton.Add_Click({
+        $State.Cancel = $true
+    })
+
+    # Evenement du bouton Reinitialiser
+    $ClearButton.Add_Click({
+        if ($State.Running) { return }
+        $TextBox.Text = ""
+        $TextBoxMarket.Text = ""
+        $DataGridView.Rows.Clear()
+        $StatusLabel.Text = "Pr" + [char]234 + "t."
+    })
+
+    # Evenement Enter dans la textbox
+    $TextBox.Add_KeyDown({
+        if ($_.KeyCode -eq "Return") {
+            $SearchButton.PerformClick()
+        }
+    })
+
+    # Double-clic : ouvrir dossier marche / poste / fichier / slide
+    $DataGridView.Add_CellDoubleClick({
+        $RowIndex = $_.RowIndex
+        if ($RowIndex -lt 0) { return }
+
+        # Colonne 0 = Marche (Affaire)
+        if ($_.ColumnIndex -eq 0) {
+            $Affaire = $DataGridView.Rows[$RowIndex].Cells[0].Value
+            $AffairePath = Join-Path -Path $Config.ExtractionRootPath -ChildPath $Affaire
+            if (Test-Path $AffairePath) {
+                try { Invoke-Item $AffairePath }
+                catch { [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture du dossier Marche: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Dossier Marche non trouve: $AffairePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            }
+        }
+
+        # Colonne 1 = Poste
+        if ($_.ColumnIndex -eq 1) {
+            $Affaire = $DataGridView.Rows[$RowIndex].Cells[0].Value
+            $Poste = $DataGridView.Rows[$RowIndex].Cells[1].Value
+            $PostePath = $null
+            foreach ($SubPath in $Config.SubPathStructures) {
+                $PossiblePath = Join-Path -Path $Config.ExtractionRootPath -ChildPath $Affaire | Join-Path -ChildPath $SubPath | Join-Path -ChildPath $Poste
+                if (Test-Path $PossiblePath) { $PostePath = $PossiblePath; break }
+            }
+            if (-not $PostePath) {
+                $PostePath = Join-Path -Path $Config.ExtractionRootPath -ChildPath $Affaire | Join-Path -ChildPath $Poste
+            }
+            if (Test-Path $PostePath) {
+                try { Invoke-Item $PostePath }
+                catch { [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture du dossier Poste: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Dossier Poste non trouve: $PostePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            }
+        }
+
+        # Colonne 2 = SOP (ouvrir le fichier)
+        if ($_.ColumnIndex -eq 2) {
+            $FilePath = $DataGridView.Rows[$RowIndex].Cells[6].Value
+            if (Test-Path $FilePath) {
+                try { Invoke-Item $FilePath }
+                catch { [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            }
+        }
+
+        # Colonne 3 = Page (ouvrir PowerPoint a la slide)
+        if ($_.ColumnIndex -eq 3) {
+            $FilePath = $DataGridView.Rows[$RowIndex].Cells[6].Value
+            $index = $DataGridView.Rows[$RowIndex].Cells[3].Value
+            if (Test-Path $FilePath) {
+                try {
+                    $pp = New-Object -ComObject PowerPoint.Application
+                    $pp.Visible = -1
+                    $presentation = $pp.Presentations.Open($FilePath)
+                    $pp.ActiveWindow.View.GotoSlide($index)
+                }
+                catch { [System.Windows.Forms.MessageBox]::Show("Erreur lors de l'ouverture: $_", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) }
+                finally {
+                    if ($presentation) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($presentation) | Out-Null }
+                    if ($pp) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pp) | Out-Null }
+                    [GC]::Collect()
+                    [GC]::WaitForPendingFinalizers()
+                }
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Fichier non trouve: $FilePath", "Erreur", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            }
+        }
+    })
+
+    # Arreter proprement la recherche si la fenetre se ferme
+    $Form.Add_FormClosing({
+        $State.Cancel = $true
+    })
+
+    # Ajouter les controles a la forme
+    $Form.Controls.Add($SearchPanel)
+    $Form.Controls.Add($DataGridView)
+    $Form.Controls.Add($StatusLabel)
+
+    # Afficher la fenetre
+    $Form.ShowDialog() | Out-Null
+}
